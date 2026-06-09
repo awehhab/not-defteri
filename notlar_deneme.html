@@ -25,7 +25,7 @@ const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 const auth = getAuth(app);
 
-window._fbSet = async (path, data) => { try { await set(ref(db, path), data); } catch(e) { console.error('FB set:', e); } };
+window._fbSet = (path, data) => set(ref(db, path), data);
 window._fbGet = async (path) => { try { const s = await get(ref(db, path)); return s.exists() ? s.val() : null; } catch(e) { return null; } };
 window._fbOnValue = (path, cb) => { return onValue(ref(db, path), s => cb(s.exists() ? s.val() : null)); };
 
@@ -656,6 +656,7 @@ body.conn-mode,.conn-mode .block{cursor:crosshair!important;}
     <div id="edit-badge" class="read">👁 Okuma</div>
     <button class="tb-btn ghost" id="edit-btn">✏ Düzenleme</button>
     <div class="sep"></div>
+    <button class="tb-btn ghost" id="save-btn" onclick="manualSave()" style="transition:.15s;min-width:100px">✓ Kaydedildi</button>
     <button class="tb-btn ghost" onclick="exportData()" style="font-size:10px">⬇</button>
     <button class="tb-btn primary" onclick="createNote()">+ Not</button>
   </div>
@@ -667,6 +668,7 @@ body.conn-mode,.conn-mode .block{cursor:crosshair!important;}
   <button id="mob-zoom-p" onclick="zoom=Math.min(3,zoom+.1);applyTx();syncMobZoom()">+</button>
   <button id="mob-fit" onclick="zoom=1;cx=0;cy=0;applyTx();syncMobZoom()">⊡ Sığdır</button>
   <div style="width:1px;height:18px;background:var(--border);flex-shrink:0;margin:0 2px"></div>
+  <button id="mob-save-btn" onclick="manualSave()" style="height:28px;padding:0 10px;border-radius:50px;border:1px solid var(--border);cursor:pointer;font-family:inherit;font-size:11px;font-weight:700;transition:.15s;background:#fff;color:var(--muted);white-space:nowrap;touch-action:manipulation">✓ Kayıt</button>
   <button id="mob-undo" onclick="undoLast()">↩ Geri</button>
   <button id="mob-conn" onclick="document.getElementById('conn-btn').click()">⟶ Bağla</button>
   <button id="mob-export" onclick="exportData()">⬇ Dışa Aktar</button>
@@ -943,65 +945,39 @@ function getUserDataPath(){return 'users/'+currentUser.uid+'/data';}
 
 function initForUser(user){
   currentUser=user;
-  setAuthLoading(false); // hide any loading state
-  document.getElementById('auth-screen').style.display='none'; // ensure hidden
+  setAuthLoading(false);
+  document.getElementById('auth-screen').style.display='none';
   const displayName=user.displayName||'Kullanıcı';
   document.getElementById('user-badge').style.display='flex';
   document.getElementById('logout-btn').style.display='';
   document.getElementById('user-av').textContent=(displayName[0]||'?').toUpperCase();
   document.getElementById('user-name').textContent=displayName;
-  // Reset state but DO NOT set fbReady yet — prevent premature saves
   fbReady=false;
   S={folders:[{id:'f1',n:'Kişisel',e:'👤'},{id:'f2',n:'İş',e:'💼'},{id:'f3',n:'Fikirler',e:'💡'}],notes:[],af:'all',ani:null};
   clearCanvas();
   setFBStatus('☁ Yükleniyor...','');
   const path=getUserDataPath();
+  // Cancel any previous listener
+  if(fbUnsub){fbUnsub();fbUnsub=null;}
   window._fbGet(path).then(remote=>{
     if(remote){
       try{
-        // Merge remote into S — remote is the source of truth
         S=Object.assign({},S,remote);
-        // Now safe to enable saves
-        fbReady=true;
-        setFBStatus('☁ Bağlı','ok');
-        renderAll();
-        if(S.ani&&S.notes.find(n=>n.id===S.ani)){openNote(S.ani);}
-        else if(S.notes.length){openNote(S.notes[0].id);}
       }catch(e){console.error(e);}
-    } else {
-      // No remote data — new account
-      fbReady=true;
-      setFBStatus('☁ Bağlı','ok');
-      createNote(true);
-      renderAll();
     }
-    // Subscribe to real-time updates only AFTER initial load
-    if(fbUnsub)fbUnsub();
-    fbUnsub=window._fbOnValue(path,remote=>{
-      if(!remote||!fbReady)return;
-      const prevAni=S.ani;
-      const renaming=!document.getElementById('note-name-inp').readOnly;
-      // Save current open note's live canvas state before merging
-      const curNote=getNote();
-      if(curNote&&document.querySelectorAll('#canvas .block').length>0){
-        curNote.blocks=exportBlocks();
-        curNote.connections=connections;
-      }
-      // Merge: remote is authoritative for structure, but keep local canvas state for current note
-      const localCurNote=prevAni?JSON.parse(JSON.stringify(S.notes.find(n=>n.id===prevAni)||{})):null;
-      S=Object.assign({},S,remote);
-      // Restore current note's live state so we don't lose unsaved edits
-      if(localCurNote&&prevAni){
-        const idx=S.notes.findIndex(n=>n.id===prevAni);
-        if(idx>=0)S.notes[idx]=localCurNote;
-      }
-      renderAll();
-      if(!renaming){
-        if(prevAni&&S.notes.find(n=>n.id===prevAni)){
-          // Don't re-render canvas if it's already showing this note
-        } else if(S.notes.length){openNote(S.notes[0].id);}
-      }
-    });
+    fbReady=true;
+    setFBStatus('☁ Bağlı','ok');
+    setSaveState('saved');
+    renderAll();
+    if(S.ani&&S.notes.find(n=>n.id===S.ani)){openNote(S.ani);}
+    else if(S.notes.length){openNote(S.notes[0].id);}
+    else{createNote(true);}
+  }).catch(e=>{
+    console.error('Firebase yükleme hatası:',e);
+    fbReady=true;
+    setFBStatus('⚠ Bağlantı hatası','');
+    setSaveState('saved');
+    renderAll();
   });
 }
 
@@ -1053,13 +1029,37 @@ function setEMBase(on){
 document.getElementById('edit-btn').onclick=()=>setEM(!editMode);
 
 // ═══ PERSIST ═══
-var saveT=null;
+var saveT=null,_saveState='saved';
+function setSaveState(st){
+  _saveState=st;
+  const btn=document.getElementById('save-btn');
+  const mob=document.getElementById('mob-save-btn');
+  if(st==='unsaved'){
+    if(btn){btn.textContent='● Kaydet';btn.style.background='#f97316';btn.style.color='#fff';btn.style.borderColor='#f97316';}
+    if(mob){mob.textContent='● Kaydet';mob.style.color='#f97316';}
+  } else if(st==='saving'){
+    if(btn){btn.textContent='⏳ Kaydediliyor...';btn.style.background='#6366f1';btn.style.color='#fff';btn.style.borderColor='#6366f1';}
+    if(mob){mob.textContent='⏳...';mob.style.color='#6366f1';}
+  } else {
+    if(btn){btn.textContent='✓ Kaydedildi';btn.style.background='';btn.style.color='';btn.style.borderColor='';}
+    if(mob){mob.textContent='✓ Kayıt';mob.style.color='';}
+  }
+}
 function save(){
   const n=getNote();if(!n)return;
   n.blocks=exportBlocks();n.connections=connections;n.zoom=zoom;n.cx=cx;n.cy=cy;n.upd=Date.now();
-  if(fbReady&&currentUser)window._fbSet(getUserDataPath(),JSON.parse(JSON.stringify(S)));
-  // localStorage only as fallback cache — never used to override Firebase on load
-  try{if(currentUser)localStorage.setItem('notlar_cache_'+currentUser.uid,JSON.stringify(S));}catch(e){}
+  if(!fbReady||!currentUser){setSaveState('unsaved');return;}
+  setSaveState('saving');
+  window._fbSet(getUserDataPath(),JSON.parse(JSON.stringify(S))).then(()=>{
+    setSaveState('saved');
+  }).catch(()=>{
+    setSaveState('unsaved');
+    toast('⚠ Kayıt başarısız — tekrar dene');
+  });
+}
+function manualSave(){
+  if(!getNote()){toast('Açık not yok');return;}
+  save();
 }
 function exportBlocks(){
   return Array.from(document.querySelectorAll('#canvas .block')).map(el=>{
@@ -1072,7 +1072,7 @@ function exportBlocks(){
       chartData:el.__cd||undefined,embedUrl};
   });
 }
-function trigSave(){clearTimeout(saveT);saveT=setTimeout(save,600);}
+function trigSave(){setSaveState('unsaved');clearTimeout(saveT);saveT=setTimeout(save,1200);}
 
 // ═══ RENDER ═══
 function renderAll(){renderFolders();renderNotes();updateCounts();renderSbTags();}
@@ -1192,7 +1192,7 @@ document.addEventListener('keydown',e=>{
   if(e.code==='Space'&&!e.target.isContentEditable&&e.target.tagName!=='INPUT'){spacePan=true;document.getElementById('canvas-wrap').style.cursor='grab';}
   if(e.key==='Escape'){cancelConn();closePal();closeCtx();closeCP();document.getElementById('sp-pop').classList.remove('open');}
   if((e.ctrlKey||e.metaKey)&&e.key==='z')undoLast();
-  if((e.ctrlKey||e.metaKey)&&e.key==='s'&&!e.target.isContentEditable){e.preventDefault();save();toast('Kaydedildi ✓');}
+  if((e.ctrlKey||e.metaKey)&&e.key==='s'&&!e.target.isContentEditable){e.preventDefault();manualSave();}
   if(e.key==='Delete'&&selBlock&&!document.activeElement.isContentEditable)removeBlock(selBlock);
 });
 document.addEventListener('keyup',e=>{if(e.code==='Space'){spacePan=false;document.getElementById('canvas-wrap').style.cursor='';}});
