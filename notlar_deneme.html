@@ -722,7 +722,7 @@ body.conn-mode,.conn-mode .block{cursor:crosshair!important;}
 <div id="notes-panel">
   <div id="np-head">
     <input id="note-name-inp" value="Tüm Notlar" readonly>
-    <button class="tb-btn ghost" style="height:23px;font-size:10px;padding:0 5px;flex-shrink:0" onclick="startRename()" title="İsim değiştir">✏</button>
+    <button class="tb-btn ghost" style="height:23px;font-size:10px;padding:0 5px;flex-shrink:0" onmousedown="event.preventDefault()" onclick="startRename()" title="İsim değiştir">✏</button>
     <button class="tb-btn ghost" style="height:23px;font-size:10px;padding:0 5px;flex-shrink:0" onclick="openTagM()" title="Etiketler">🏷</button>
     <button class="tb-btn ghost" style="height:23px;font-size:10px;padding:0 5px;flex-shrink:0" onclick="toggleStar()" title="Favori">⭐</button>
   </div>
@@ -961,10 +961,13 @@ function initForUser(user){
     fbUnsub=window._fbOnValue(path,remote=>{
       if(!remote)return;
       const prevAni=S.ani;
+      const renaming=!document.getElementById('note-name-inp').readOnly;
       S={...S,...remote};
       renderAll();
-      if(prevAni&&document.querySelectorAll('#canvas .block').length>0){}
-      else if(prevAni&&S.notes.find(n=>n.id===prevAni)){openNote(prevAni);}
+      if(!renaming){
+        if(prevAni&&document.querySelectorAll('#canvas .block').length>0){}
+        else if(prevAni&&S.notes.find(n=>n.id===prevAni)){openNote(prevAni);}
+      }
     });
   });
 }
@@ -1096,7 +1099,7 @@ function openNote(id){
   connections=n.connections||[];zoom=n.zoom||1;cx=n.cx||0;cy=n.cy||0;applyTx();
   (n.blocks||[]).forEach(b=>restoreBlock(b));renderConns();renderNotes();
   if(curView==='cal')renderCal();
-  const inp=document.getElementById('note-name-inp');inp.value=n.title||'Başlıksız';inp.readOnly=true;inp.classList.remove('ed');
+  const inp=document.getElementById('note-name-inp');if(inp.readOnly){inp.value=n.title||'Başlıksız';}
   document.getElementById('active-note-title').textContent=n.title||'Başlıksız';
 }
 function clearCanvas(){Array.from(document.querySelectorAll('#canvas .block')).forEach(e=>e.remove());document.getElementById('svg-conn').innerHTML='';selBlock=null;exitDraw();}
@@ -1105,9 +1108,17 @@ function selFolder(id,el){S.af=id;document.querySelectorAll('.fi').forEach(e=>e.
 function toggleStar(){const n=getNote();if(!n)return;n.star=!n.star;save();renderNotes();updateCounts();toast(n.star?'⭐ Favorilere eklendi':'Favorilerden çıkarıldı');}
 const nInp=document.getElementById('note-name-inp');
 nInp.addEventListener('dblclick',()=>{const n=getNote();if(!n)return;nInp.readOnly=false;nInp.classList.add('ed');nInp.focus();nInp.select();});
-nInp.addEventListener('blur',()=>{const n=getNote();if(!n){nInp.readOnly=true;nInp.classList.remove('ed');return;}const v=nInp.value.trim();if(v&&v!==n.title){n.title=v;save();renderNotes();document.getElementById('active-note-title').textContent=v;toast('İsim değişti');}nInp.readOnly=true;nInp.classList.remove('ed');});
+nInp.addEventListener('blur',()=>{
+  if(nInp.readOnly)return;
+  const n=getNote();
+  nInp.readOnly=true;nInp.classList.remove('ed');
+  if(!n)return;
+  const v=nInp.value.trim();
+  if(v&&v!==n.title){n.title=v;save();renderNotes();document.getElementById('active-note-title').textContent=v;toast('İsim değişti');}
+  else{nInp.value=n.title||'Başlıksız';}
+});
 nInp.addEventListener('keydown',e=>{if(e.key==='Enter')nInp.blur();if(e.key==='Escape'){nInp.value=getNote()?.title||'';nInp.blur();}});
-function startRename(){const n=getNote();if(!n)return;nInp.readOnly=false;nInp.classList.add('ed');nInp.focus();nInp.select();}
+function startRename(){const n=getNote();if(!n)return;nInp.readOnly=false;nInp.classList.add('ed');nInp.value=n.title||'Başlıksız';requestAnimationFrame(()=>{nInp.focus();nInp.select();});}
 
 // ═══ FOLDERS & TAGS ═══
 function openFM(){document.getElementById('fm').classList.add('open');setTimeout(()=>document.getElementById('fm-name').focus(),50);}
