@@ -950,34 +950,56 @@ function initForUser(user){
   document.getElementById('logout-btn').style.display='';
   document.getElementById('user-av').textContent=(displayName[0]||'?').toUpperCase();
   document.getElementById('user-name').textContent=displayName;
-  document.getElementById('auth-screen').style.display='none';
+  // Reset state but DO NOT set fbReady yet — prevent premature saves
+  fbReady=false;
   S={folders:[{id:'f1',n:'Kişisel',e:'👤'},{id:'f2',n:'İş',e:'💼'},{id:'f3',n:'Fikirler',e:'💡'}],notes:[],af:'all',ani:null};
   clearCanvas();
-  setFBStatus('☁ Bağlı','ok');
-  fbReady=true;
+  setFBStatus('☁ Yükleniyor...','');
   const path=getUserDataPath();
   window._fbGet(path).then(remote=>{
     if(remote){
       try{
-        S={...S,...remote};
+        // Merge remote into S — remote is the source of truth
+        S=Object.assign({},S,remote);
+        // Now safe to enable saves
+        fbReady=true;
+        setFBStatus('☁ Bağlı','ok');
         renderAll();
         if(S.ani&&S.notes.find(n=>n.id===S.ani)){openNote(S.ani);}
         else if(S.notes.length){openNote(S.notes[0].id);}
       }catch(e){console.error(e);}
     } else {
-      if(!S.notes.length)createNote(true);
+      // No remote data — new account
+      fbReady=true;
+      setFBStatus('☁ Bağlı','ok');
+      createNote(true);
       renderAll();
     }
+    // Subscribe to real-time updates only AFTER initial load
     if(fbUnsub)fbUnsub();
     fbUnsub=window._fbOnValue(path,remote=>{
-      if(!remote)return;
+      if(!remote||!fbReady)return;
       const prevAni=S.ani;
       const renaming=!document.getElementById('note-name-inp').readOnly;
-      S={...S,...remote};
+      // Save current open note's live canvas state before merging
+      const curNote=getNote();
+      if(curNote&&document.querySelectorAll('#canvas .block').length>0){
+        curNote.blocks=exportBlocks();
+        curNote.connections=connections;
+      }
+      // Merge: remote is authoritative for structure, but keep local canvas state for current note
+      const localCurNote=prevAni?JSON.parse(JSON.stringify(S.notes.find(n=>n.id===prevAni)||{})):null;
+      S=Object.assign({},S,remote);
+      // Restore current note's live state so we don't lose unsaved edits
+      if(localCurNote&&prevAni){
+        const idx=S.notes.findIndex(n=>n.id===prevAni);
+        if(idx>=0)S.notes[idx]=localCurNote;
+      }
       renderAll();
       if(!renaming){
-        if(prevAni&&document.querySelectorAll('#canvas .block').length>0){}
-        else if(prevAni&&S.notes.find(n=>n.id===prevAni)){openNote(prevAni);}
+        if(prevAni&&S.notes.find(n=>n.id===prevAni)){
+          // Don't re-render canvas if it's already showing this note
+        } else if(S.notes.length){openNote(S.notes[0].id);}
       }
     });
   });
@@ -1035,11 +1057,10 @@ var saveT=null;
 function save(){
   const n=getNote();if(!n)return;
   n.blocks=exportBlocks();n.connections=connections;n.zoom=zoom;n.cx=cx;n.cy=cy;n.upd=Date.now();
-  saveLocal();
   if(fbReady&&currentUser)window._fbSet(getUserDataPath(),JSON.parse(JSON.stringify(S)));
+  // localStorage only as fallback cache — never used to override Firebase on load
+  try{if(currentUser)localStorage.setItem('notlar_cache_'+currentUser.uid,JSON.stringify(S));}catch(e){}
 }
-function saveLocal(){try{if(currentUser)localStorage.setItem('notlar_v7_'+currentUser.uid,JSON.stringify(S));}catch(e){}}
-function loadLocal(){try{if(currentUser){const d=localStorage.getItem('notlar_v7_'+currentUser.uid);if(d){const p=JSON.parse(d);S={...S,...p};}}}catch(e){}}
 function exportBlocks(){
   return Array.from(document.querySelectorAll('#canvas .block')).map(el=>{
     const img=el.querySelector('img');
