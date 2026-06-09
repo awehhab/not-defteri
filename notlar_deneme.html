@@ -445,8 +445,8 @@ body.conn-mode,.conn-mode .block{cursor:crosshair!important;}
   #ctx{min-width:180px;}
   /* Touch: bigger tap targets */
   .bh-btn{min-width:26px;min-height:26px;padding:3px 5px;font-size:10px;}
-  .res-se{width:16px;height:16px;right:-6px;bottom:-6px;}
-  .res-e{width:10px;height:30px;right:-6px;}
+  .res-se{width:22px;height:22px;right:-8px;bottom:-8px;}
+  .res-e{width:14px;height:36px;right:-8px;}
   /* Block header always visible on mobile (no hover) */
   .bh{opacity:1!important;pointer-events:all!important;}
   body.read-mode .bh{opacity:0!important;pointer-events:none!important;}
@@ -1447,14 +1447,45 @@ function initBIBase(el){
     const mv=m=>{const nw=Math.max(80,sw+(m.clientX-sx)/zoom);el.style.width=nw+'px';if(ratio){img.style.width=nw+'px';img.style.height='auto';}else el.style.height=Math.max(40,sh+(m.clientY-sy)/zoom)+'px';const dc=el.querySelector('.dc');if(dc)dc.style.width=(nw-4)+'px';};
     const up=()=>{document.removeEventListener('mousemove',mv);document.removeEventListener('mouseup',up);save();};
     document.addEventListener('mousemove',mv);document.addEventListener('mouseup',up);
-  });}
+  });
+  // Touch resize SE
+  resSE.addEventListener('touchstart',e=>{
+    if(!editMode)return;e.preventDefault();e.stopPropagation();
+    const t0=e.touches[0];
+    const sx=t0.clientX,sy=t0.clientY,sw=el.offsetWidth,sh=el.offsetHeight;
+    const img=el.querySelector('img');const ratio=img?img.__ratio||(img.naturalHeight/img.naturalWidth):null;
+    const mv=te=>{
+      if(!te.touches[0])return;
+      const nw=Math.max(80,sw+(te.touches[0].clientX-sx)/zoom);
+      el.style.width=nw+'px';
+      if(ratio){img.style.width=nw+'px';img.style.height='auto';}
+      else el.style.height=Math.max(40,sh+(te.touches[0].clientY-sy)/zoom)+'px';
+      const dc=el.querySelector('.dc');if(dc)dc.style.width=(nw-4)+'px';
+    };
+    const up=()=>{resSE.removeEventListener('touchmove',mv);resSE.removeEventListener('touchend',up);save();};
+    resSE.addEventListener('touchmove',mv,{passive:false});
+    resSE.addEventListener('touchend',up);
+  },{passive:false});}
   if(resE){resE.addEventListener('mousedown',e=>{
     if(!editMode)return;e.preventDefault();e.stopPropagation();
     const sx=e.clientX,sw=el.offsetWidth;
     const mv=m=>{el.style.width=Math.max(80,sw+(m.clientX-sx)/zoom)+'px';};
     const up=()=>{document.removeEventListener('mousemove',mv);document.removeEventListener('mouseup',up);save();};
     document.addEventListener('mousemove',mv);document.addEventListener('mouseup',up);
-  });}
+  });
+  // Touch resize E
+  resE.addEventListener('touchstart',e=>{
+    if(!editMode)return;e.preventDefault();e.stopPropagation();
+    const t0=e.touches[0];
+    const sx=t0.clientX,sw=el.offsetWidth;
+    const mv=te=>{
+      if(!te.touches[0])return;
+      el.style.width=Math.max(80,sw+(te.touches[0].clientX-sx)/zoom)+'px';
+    };
+    const up=()=>{resE.removeEventListener('touchmove',mv);resE.removeEventListener('touchend',up);save();};
+    resE.addEventListener('touchmove',mv,{passive:false});
+    resE.addEventListener('touchend',up);
+  },{passive:false});}
   el.addEventListener('contextmenu',e=>{e.preventDefault();e.stopPropagation();if(!editMode)return;sel(el);showCtx(e.clientX,e.clientY);});
 }
 function sel(el){desel();selBlock=el;el.classList.add('sel');if(document.getElementById('props').classList.contains('open'))updProps(el);}
@@ -1799,60 +1830,68 @@ function addTouchDrag(el){
 // initBI adds touch drag on top of base interaction
 function initBI(el){initBIBase(el);addTouchDrag(el);}
 
-// Pinch-to-zoom + two-finger pan — intercept browser native pinch
+// Pinch-to-zoom + two-finger pan — correct focal-point implementation
 (function(){
   var cw=document.getElementById('canvas-wrap');
-  var lastDist=0,pinching=false,t2Start=null,pinchMidStart=null;
+  var pinching=false;
+  // State captured at pinch START — stays fixed during the gesture
+  var startDist=0,startZoom=1,startCx=0,startCy=0,startMidX=0,startMidY=0;
+  var lastMidX=0,lastMidY=0,lastDist=0;
 
-  // Prevent browser-level pinch zoom on the canvas area
   cw.addEventListener('touchstart',function(e){
     if(e.touches.length===2){
-      e.preventDefault(); // stop browser zoom
+      e.preventDefault();
       pinching=true;
-      touchPanActive=false; isDrag=false; // cancel any single-finger pan
-      lastDist=Math.hypot(
+      touchPanActive=false; isDrag=false;
+      // Capture everything at gesture start
+      startDist=Math.hypot(
         e.touches[0].clientX-e.touches[1].clientX,
         e.touches[0].clientY-e.touches[1].clientY
       );
-      var midX=(e.touches[0].clientX+e.touches[1].clientX)/2;
-      var midY=(e.touches[0].clientY+e.touches[1].clientY)/2;
-      pinchMidStart={x:midX,y:midY};
-      t2Start={x:midX-cx,y:midY-cy};
+      startZoom=zoom;
+      startCx=cx; startCy=cy;
+      startMidX=(e.touches[0].clientX+e.touches[1].clientX)/2;
+      startMidY=(e.touches[0].clientY+e.touches[1].clientY)/2;
+      lastMidX=startMidX; lastMidY=startMidY;
+      lastDist=startDist;
     }
   },{passive:false});
 
   cw.addEventListener('touchmove',function(e){
     if(!pinching||e.touches.length!==2)return;
     e.preventDefault();
-    var d=Math.hypot(
+
+    var curDist=Math.hypot(
       e.touches[0].clientX-e.touches[1].clientX,
       e.touches[0].clientY-e.touches[1].clientY
     );
-    if(lastDist>0){
-      var newZoom=Math.max(.2,Math.min(3,zoom+(d-lastDist)*0.006));
-      // Zoom toward pinch center
-      var midX=(e.touches[0].clientX+e.touches[1].clientX)/2;
-      var midY=(e.touches[0].clientY+e.touches[1].clientY)/2;
-      var ratio=newZoom/zoom;
-      cx=midX-(midX-cx)*ratio;
-      cy=midY-(midY-cy)*ratio;
-      zoom=newZoom;
-    }
-    lastDist=d;
-    // Two-finger pan
-    if(t2Start){
-      var curMidX=(e.touches[0].clientX+e.touches[1].clientX)/2;
-      var curMidY=(e.touches[0].clientY+e.touches[1].clientY)/2;
-      cx=curMidX-t2Start.x;
-      cy=curMidY-t2Start.y;
-    }
+    var curMidX=(e.touches[0].clientX+e.touches[1].clientX)/2;
+    var curMidY=(e.touches[0].clientY+e.touches[1].clientY)/2;
+
+    // New zoom relative to start
+    var newZoom=Math.max(0.2,Math.min(3, startDist>0 ? startZoom*(curDist/startDist) : startZoom));
+
+    // Focal point: the world point under the pinch mid at start stays under curMid
+    // worldX = (screenX - cx) / zoom  →  at start: (startMidX - startCx) / startZoom
+    // we want: (curMidX - newCx) / newZoom = same world point + pan delta
+    var worldPivotX=(startMidX-startCx)/startZoom;
+    var worldPivotY=(startMidY-startCy)/startZoom;
+    // Two-finger pan: how much did the midpoint move?
+    var panX=curMidX-startMidX;
+    var panY=curMidY-startMidY;
+    // Apply: new cx so that worldPivot maps to curMid, plus pan
+    cx=curMidX-worldPivotX*newZoom;
+    cy=curMidY-worldPivotY*newZoom;
+
+    zoom=newZoom;
     applyTx();
+    lastMidX=curMidX; lastMidY=curMidY; lastDist=curDist;
   },{passive:false});
 
   cw.addEventListener('touchend',function(e){
     if(e.touches.length<2){
       if(pinching)save();
-      pinching=false;lastDist=0;t2Start=null;pinchMidStart=null;
+      pinching=false;
     }
   },{passive:true});
 })();
