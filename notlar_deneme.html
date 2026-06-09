@@ -2,7 +2,7 @@
 <html lang="tr">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
 <title>✦ Notlar</title>
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script type="module">
@@ -70,7 +70,7 @@ window._fbReady = true;
   --sh:0 2px 8px rgba(0,0,0,.07);--sh2:0 4px 20px rgba(59,91,219,.12);
 }
 *{-webkit-tap-highlight-color:transparent;}
-body{font-family:'Outfit',sans-serif;background:#eef2fb;color:var(--text);height:100vh;overflow:hidden;display:flex;flex-direction:column;user-select:none;-webkit-user-select:none;}
+body{font-family:'Outfit',sans-serif;background:#eef2fb;color:var(--text);height:100vh;overflow:hidden;display:flex;flex-direction:column;user-select:none;-webkit-user-select:none;touch-action:pan-x pan-y;}
 /* TOPBAR */
 #topbar{height:50px;background:#fff;border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 10px;gap:5px;z-index:200;flex-shrink:0;}
 #logo{font-size:15px;font-weight:800;color:var(--blue);white-space:nowrap;}
@@ -577,7 +577,13 @@ body.conn-mode,.conn-mode .block{cursor:crosshair!important;}
 }
 @keyframes spin{to{transform:rotate(360deg);}}
 
-/* User badge in topbar */
+/* Allow pinch zoom in image blocks */
+.b-image{touch-action:pinch-zoom;}
+.b-image img{touch-action:pinch-zoom;pointer-events:auto;}
+/* Allow pinch zoom in sheets & modals */
+.mob-sheet-body{touch-action:pan-y pinch-zoom;}
+.modal{touch-action:pan-y pinch-zoom;}
+#auth-screen{touch-action:pan-y pinch-zoom;}
 #user-badge{
   display:flex;align-items:center;gap:6px;padding:3px 8px 3px 4px;
   background:#f0f4ff;border:1px solid var(--bblue);border-radius:50px;
@@ -905,6 +911,9 @@ async function doAuth(){
     showAuthError(msgs[code]||('Hata: '+code));
     return;
   }
+  // Immediately hide auth screen — onAuthStateChanged will call initForUser
+  document.getElementById('auth-screen').style.display='none';
+  setAuthLoading(true); // show spinner on main app while data loads
 }
 async function doLogout(){
   if(!confirm('Çıkış yapmak istediğine emin misin?'))return;
@@ -934,6 +943,8 @@ function getUserDataPath(){return 'users/'+currentUser.uid+'/data';}
 
 function initForUser(user){
   currentUser=user;
+  setAuthLoading(false); // hide any loading state
+  document.getElementById('auth-screen').style.display='none'; // ensure hidden
   const displayName=user.displayName||'Kullanıcı';
   document.getElementById('user-badge').style.display='flex';
   document.getElementById('logout-btn').style.display='';
@@ -973,7 +984,7 @@ function initForUser(user){
 }
 
 // Auth state observer
-setTimeout(()=>{
+(function initAuthObserver(){
   if(window._authOnChange){
     window._authOnChange(user=>{
       if(user){
@@ -986,8 +997,24 @@ setTimeout(()=>{
         setFBStatus('⏳ Giriş bekleniyor...','');
       }
     });
+  } else {
+    // Firebase not ready yet, retry
+    setTimeout(initAuthObserver, 50);
   }
-},200);
+})();
+
+// Block browser-native pinch zoom on canvas area but allow on images/modals
+document.addEventListener('touchmove', function(e){
+  if(e.touches.length<2) return; // single finger - always ok
+  // Allow pinch zoom on: auth screen, modals, image blocks, sheet bodies
+  var t=e.target;
+  if(t.closest('#auth-screen')||t.closest('.modal')||t.closest('.mbg')||
+     t.closest('.mob-sheet-body')||t.closest('.b-image')){
+    return; // let browser handle zoom here
+  }
+  // Block browser zoom on canvas area (we handle it ourselves)
+  e.preventDefault();
+},{passive:false});
 
 // ═══ INIT ═══
 setEM(false);buildCP();buildSP();
@@ -1165,16 +1192,37 @@ document.addEventListener('mouseup',e=>{
   if(isDrag){isDrag=false;document.getElementById('canvas-wrap').style.cursor='';save();}
   if(activeDB&&isDrawing)handleDUp();
 });
-let touch0=null;
+let touch0=null,touchPanActive=false;
 document.getElementById('canvas-wrap').addEventListener('touchstart',e=>{
   if(activeDB){handleDT(e,'start');return;}
-  if(e.touches.length===1&&e.target.id==='canvas-wrap'){touch0={x:e.touches[0].clientX-cx,y:e.touches[0].clientY-cy};isDrag=true;}
+  if(e.touches.length===1){
+    const t=e.target;
+    const isBackground=t===document.getElementById('canvas-wrap')||
+      t===document.getElementById('canvas')||
+      t===document.getElementById('canvas-bg')||
+      t===document.getElementById('read-overlay')||
+      t.id==='svg-conn';
+    // In read mode: pan from anywhere (blocks don't stop propagation)
+    // In edit mode: only pan from background
+    if(isBackground||!editMode){
+      touch0={x:e.touches[0].clientX-cx,y:e.touches[0].clientY-cy};
+      isDrag=true;touchPanActive=true;
+    }
+  }
 },{passive:true});
 document.getElementById('canvas-wrap').addEventListener('touchmove',e=>{
   if(activeDB){handleDT(e,'move');return;}
-  if(isDrag&&touch0&&e.touches.length===1){cx=e.touches[0].clientX-touch0.x;cy=e.touches[0].clientY-touch0.y;applyTx();}
-},{passive:true});
-document.getElementById('canvas-wrap').addEventListener('touchend',()=>{isDrag=false;touch0=null;if(activeDB)handleDT(null,'end');});
+  if(isDrag&&touch0&&touchPanActive&&e.touches.length===1){
+    e.preventDefault();
+    cx=e.touches[0].clientX-touch0.x;
+    cy=e.touches[0].clientY-touch0.y;
+    applyTx();
+  }
+},{passive:false});
+document.getElementById('canvas-wrap').addEventListener('touchend',e=>{
+  if(e.touches.length===0){isDrag=false;touch0=null;touchPanActive=false;}
+  if(activeDB)handleDT(null,'end');
+});
 document.getElementById('canvas').addEventListener('dblclick',e=>{
   if(!editMode||e.target!==document.getElementById('canvas'))return;
   const r=document.getElementById('canvas').getBoundingClientRect();
@@ -1374,7 +1422,15 @@ function initBIBase(el){
     if(e.target.closest('[contenteditable]')||e.target.tagName==='INPUT'||e.target.tagName==='BUTTON'||e.target.tagName==='SELECT'||e.target.tagName==='CANVAS'||e.target.tagName==='IFRAME')return;
     e.stopPropagation();if(connMode){handleConn(el);return;}sel(el);
   });
-  el.addEventListener('touchstart',e=>{if(!editMode)return;if(e.target.closest('[contenteditable]'))return;e.stopPropagation();sel(el);},{passive:true});
+  el.addEventListener('touchstart',e=>{
+    if(!editMode){
+      // In read mode: let canvas-wrap touchstart handler deal with panning
+      // Don't stop propagation so parent can pan
+      return;
+    }
+    if(e.target.closest('[contenteditable]'))return;
+    e.stopPropagation();sel(el);
+  },{passive:true});
   if(handle){handle.addEventListener('mousedown',e=>{
     if(!editMode||e.target.tagName==='BUTTON')return;
     e.preventDefault();e.stopPropagation();sel(el);
@@ -1743,28 +1799,61 @@ function addTouchDrag(el){
 // initBI adds touch drag on top of base interaction
 function initBI(el){initBIBase(el);addTouchDrag(el);}
 
-// Pinch-to-zoom + two-finger pan
+// Pinch-to-zoom + two-finger pan — intercept browser native pinch
 (function(){
   var cw=document.getElementById('canvas-wrap');
-  var lastDist=0,pinching=false,t2Start=null;
+  var lastDist=0,pinching=false,t2Start=null,pinchMidStart=null;
+
+  // Prevent browser-level pinch zoom on the canvas area
   cw.addEventListener('touchstart',function(e){
     if(e.touches.length===2){
+      e.preventDefault(); // stop browser zoom
       pinching=true;
-      lastDist=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);
-      t2Start={x:(e.touches[0].clientX+e.touches[1].clientX)/2-cx,y:(e.touches[0].clientY+e.touches[1].clientY)/2-cy};
-      isDrag=false;
+      touchPanActive=false; isDrag=false; // cancel any single-finger pan
+      lastDist=Math.hypot(
+        e.touches[0].clientX-e.touches[1].clientX,
+        e.touches[0].clientY-e.touches[1].clientY
+      );
+      var midX=(e.touches[0].clientX+e.touches[1].clientX)/2;
+      var midY=(e.touches[0].clientY+e.touches[1].clientY)/2;
+      pinchMidStart={x:midX,y:midY};
+      t2Start={x:midX-cx,y:midY-cy};
     }
-  },{passive:true});
+  },{passive:false});
+
   cw.addEventListener('touchmove',function(e){
     if(!pinching||e.touches.length!==2)return;
-    var d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);
-    if(lastDist>0){zoom=Math.max(.2,Math.min(3,zoom+(d-lastDist)*0.006));}
+    e.preventDefault();
+    var d=Math.hypot(
+      e.touches[0].clientX-e.touches[1].clientX,
+      e.touches[0].clientY-e.touches[1].clientY
+    );
+    if(lastDist>0){
+      var newZoom=Math.max(.2,Math.min(3,zoom+(d-lastDist)*0.006));
+      // Zoom toward pinch center
+      var midX=(e.touches[0].clientX+e.touches[1].clientX)/2;
+      var midY=(e.touches[0].clientY+e.touches[1].clientY)/2;
+      var ratio=newZoom/zoom;
+      cx=midX-(midX-cx)*ratio;
+      cy=midY-(midY-cy)*ratio;
+      zoom=newZoom;
+    }
     lastDist=d;
-    if(t2Start){cx=(e.touches[0].clientX+e.touches[1].clientX)/2-t2Start.x;cy=(e.touches[0].clientY+e.touches[1].clientY)/2-t2Start.y;}
+    // Two-finger pan
+    if(t2Start){
+      var curMidX=(e.touches[0].clientX+e.touches[1].clientX)/2;
+      var curMidY=(e.touches[0].clientY+e.touches[1].clientY)/2;
+      cx=curMidX-t2Start.x;
+      cy=curMidY-t2Start.y;
+    }
     applyTx();
-  },{passive:true});
+  },{passive:false});
+
   cw.addEventListener('touchend',function(e){
-    if(e.touches.length<2){if(pinching)save();pinching=false;lastDist=0;t2Start=null;}
+    if(e.touches.length<2){
+      if(pinching)save();
+      pinching=false;lastDist=0;t2Start=null;pinchMidStart=null;
+    }
   },{passive:true});
 })();
 
