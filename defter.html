@@ -76,15 +76,65 @@ window._fbReady = true;
 *{-webkit-tap-highlight-color:transparent;}
 body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);user-select:none;-webkit-user-select:none;}
 /* Landing mode: scroll allowed; app mode: fixed viewport */
-#app-wrap{display:none;flex-direction:column;height:100vh;overflow:hidden;touch-action:pan-x pan-y;}
+#app-wrap{display:none;flex-direction:column;height:100vh;overflow:hidden;touch-action:pan-x pan-y;opacity:0;}
 body.app-mode #app-wrap{display:flex;}
-body.app-mode #landing{display:none;}
 body.app-mode{overflow:hidden;}
+
+/* ── PAGE TRANSITION OVERLAY ── */
+#page-transition{
+  position:fixed;inset:0;z-index:9999;
+  background:#fff;
+  pointer-events:none;
+  opacity:0;
+}
+#page-transition.t-in{
+  animation:pt-in .38s cubic-bezier(.4,0,.2,1) forwards;
+  pointer-events:all;
+}
+#page-transition.t-out{
+  animation:pt-out .38s cubic-bezier(.4,0,.2,1) forwards;
+}
+@keyframes pt-in{
+  from{opacity:0;} to{opacity:1;}
+}
+@keyframes pt-out{
+  from{opacity:1;} to{opacity:0;}
+}
+/* App-wrap fade-in */
+#app-wrap.app-enter{
+  animation:app-fadein .45s .1s cubic-bezier(.4,0,.2,1) forwards;
+}
+@keyframes app-fadein{
+  from{opacity:0;transform:translateY(12px);}
+  to{opacity:1;transform:translateY(0);}
+}
+@keyframes app-fadeout{
+  from{opacity:1;transform:translateY(0);}
+  to{opacity:0;transform:translateY(8px);}
+}
+/* Landing fade-out */
+#landing.lp-exit{
+  animation:lp-fadeout .3s cubic-bezier(.4,0,.2,1) forwards;
+  pointer-events:none;
+}
+@keyframes lp-fadeout{
+  from{opacity:1;transform:scale(1);}
+  to{opacity:0;transform:scale(.98);}
+}
+/* Landing fade-in (coming back from app) */
+#landing.lp-enter{
+  animation:lp-fadein .45s cubic-bezier(.4,0,.2,1) forwards;
+}
+@keyframes lp-fadein{
+  from{opacity:0;transform:scale(.98);}
+  to{opacity:1;transform:scale(1);}
+}
 /* Canvas dot grid */
 #canvas-bg{position:absolute;inset:0;pointer-events:none;background-image:radial-gradient(circle,#c8cdd8 1px,transparent 1px);background-size:22px 22px;opacity:.45;}
 /* TOPBAR */
 #topbar{height:var(--topbar-h);background:#fff;border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 10px;gap:4px;z-index:200;flex-shrink:0;}
-#logo{font-size:14px;font-weight:800;color:var(--text);white-space:nowrap;letter-spacing:-.5px;display:flex;align-items:center;gap:5px;}
+#logo{font-size:14px;font-weight:800;color:var(--text);white-space:nowrap;letter-spacing:-.5px;display:flex;align-items:center;gap:5px;cursor:pointer;border-radius:6px;padding:2px 5px;transition:background .13s,color .13s;}
+#logo:hover{background:var(--pale);color:var(--blue);}
 #logo::before{content:'✦';color:var(--blue);font-size:13px;}
 #active-note-title{font-size:12px;font-weight:500;color:var(--muted);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:2px 6px;border-radius:5px;}
 .sep{width:1px;height:16px;background:var(--border);flex-shrink:0;margin:0 1px;}
@@ -1171,10 +1221,10 @@ body.edit-mode-on #layout { padding-bottom: 64px; }
 // Landing dot grid
 (function(){
   const c=document.getElementById('dot-canvas'),ctx=c.getContext('2d');
-  let W,H,mouse={x:-9999,y:-9999};
+  let W,H,mouse={x:-9999,y:-9999},loopId=null;
   const S=22,R=120;
   function resize(){W=c.width=window.innerWidth;H=c.height=window.innerHeight;}
-  function draw(){
+  function drawFrame(){
     ctx.clearRect(0,0,W,H);
     const cols=Math.ceil(W/S)+2,rows=Math.ceil(H/S)+2;
     for(let r=0;r<rows;r++)for(let cl=0;cl<cols;cl++){
@@ -1184,11 +1234,17 @@ body.edit-mode-on #layout { padding-bottom: 64px; }
       ctx.beginPath();ctx.arc(x,y,sz,0,Math.PI*2);
       ctx.fillStyle='rgba(79,70,229,'+op+')';ctx.fill();
     }
-    if(document.getElementById('landing').style.display!=='none')requestAnimationFrame(draw);
+    loopId=requestAnimationFrame(drawFrame);
   }
+  function start(){
+    if(loopId){cancelAnimationFrame(loopId);loopId=null;}
+    resize();
+    drawFrame();
+  }
+  window._dotCanvasRestart=start;
   window.addEventListener('mousemove',e=>{mouse.x=e.clientX;mouse.y=e.clientY;});
   window.addEventListener('resize',resize);
-  resize();draw();
+  start();
   setTimeout(()=>c.classList.add('lp-visible'),100);
 })();
 // Scroll reveal
@@ -1205,12 +1261,49 @@ body.edit-mode-on #layout { padding-bottom: 64px; }
   },{threshold:.12});
   els.forEach(el=>io.observe(el));
 })();
-// Open app
+// Open app with smooth transition
 function openApp(){
-  document.getElementById('landing').style.display='none';
-  document.getElementById('dot-canvas').style.display='none';
-  document.body.classList.add('app-mode');
-  document.getElementById('app-wrap').style.display='flex';
+  const landing = document.getElementById('landing');
+  const appWrap = document.getElementById('app-wrap');
+  const dotCanvas = document.getElementById('dot-canvas');
+
+  landing.classList.add('lp-exit');
+  setTimeout(()=>{
+    landing.style.display = 'none';
+    landing.classList.remove('lp-exit');
+    dotCanvas.style.display = 'none';
+    document.body.classList.add('app-mode');
+    appWrap.style.display = 'flex';
+    appWrap.classList.add('app-enter');
+    appWrap.addEventListener('animationend', ()=>{
+      appWrap.classList.remove('app-enter');
+      appWrap.style.opacity = '1';
+    }, {once:true});
+  }, 300);
+}
+
+// Go back to landing from app
+function goHome(){
+  const landing = document.getElementById('landing');
+  const appWrap = document.getElementById('app-wrap');
+  const dotCanvas = document.getElementById('dot-canvas');
+
+  appWrap.style.animation = 'app-fadeout .3s cubic-bezier(.4,0,.2,1) forwards';
+  setTimeout(()=>{
+    document.body.classList.remove('app-mode');
+    appWrap.style.display = 'none';
+    appWrap.style.animation = '';
+    appWrap.style.opacity = '0';
+    dotCanvas.style.display = '';
+    dotCanvas.style.opacity = '0';
+    landing.style.display = '';
+    landing.classList.add('lp-enter');
+    landing.addEventListener('animationend', ()=>landing.classList.remove('lp-enter'), {once:true});
+    // Restart dot canvas
+    if(window._dotCanvasRestart) window._dotCanvasRestart();
+    setTimeout(()=>{ dotCanvas.style.opacity=''; dotCanvas.classList.add('lp-visible'); }, 50);
+    window.scrollTo(0,0);
+  }, 280);
 }
 </script>
 </div><!-- /landing -->
@@ -1243,7 +1336,7 @@ function openApp(){
 </div>
 
 <div id="topbar">
-  <div id="logo">Notlar</div>
+  <div id="logo" onclick="goHome()">Notlar</div>
   <div class="sep"></div>
   <span id="active-note-title">—</span>
   <div class="tb-right">
