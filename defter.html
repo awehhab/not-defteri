@@ -180,7 +180,7 @@ body.app-mode{overflow:hidden;}
   from{opacity:0;transform:scale(.98);}
   to{opacity:1;transform:scale(1);}
 }
-/* Canvas dot grid */
+/* Canvas dot grid — moves with canvas pan/zoom */
 #canvas-bg{position:absolute;inset:0;pointer-events:none;background-image:radial-gradient(circle,#c8cdd8 1px,transparent 1px);background-size:22px 22px;opacity:.45;}
 /* TOPBAR */
 #topbar{height:var(--topbar-h);background:#fff;border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 10px;gap:4px;z-index:200;flex-shrink:0;}
@@ -338,8 +338,8 @@ body.edit-mode-on .block [contenteditable],body.edit-mode-on .block input,body.e
 .b-card{background:#fff;min-width:170px;min-height:70px;box-shadow:var(--sh);border-radius:12px;height:auto;}
 .b-card .ch{padding:9px 12px 5px;font-size:12.5px;font-weight:700;outline:none;border-bottom:1px solid #f1f5f9;cursor:text;word-break:break-word;letter-spacing:-.2px;overflow:visible;height:auto;display:block;}
 .b-card .cb{padding:7px 12px 11px;font-size:12.5px;outline:none;color:var(--muted);line-height:1.65;cursor:text;min-height:36px;word-break:break-word;overflow:visible;height:auto;display:block;}
-.b-code{min-width:180px;min-height:50px;}
-.b-code .bi{padding:10px 14px;outline:none;font-family:'JetBrains Mono',monospace;font-size:12px;background:#16202e;color:#cdd9e5;border-radius:calc(var(--rsm)-1px);line-height:1.7;white-space:pre-wrap;word-break:break-word;cursor:text;}
+.b-code{min-width:180px;min-height:50px;height:auto;}
+.b-code .bi{padding:10px 14px;outline:none;font-family:'JetBrains Mono',monospace;font-size:12px;background:#16202e;color:#cdd9e5;border-radius:calc(var(--rsm)-1px);line-height:1.7;white-space:pre-wrap;word-break:break-word;cursor:text;height:auto;display:block;}
 /* Checklist - styles in redesign section below */
 /* FIX: table - tbl-scroll wrapper for scrolling, block itself overflow:visible for bh */
 .b-table{background:#fff;min-width:180px;box-shadow:var(--sh);}
@@ -505,9 +505,10 @@ body.conn-mode,.conn-mode .block{cursor:crosshair!important;}
 #conn-hint{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);background:#1e293b;color:#fff;padding:5px 14px;border-radius:50px;font-size:11.5px;font-weight:600;display:none;z-index:999;}
 #conn-hint.show{display:block;}
 /* PROPS */
-#props{position:fixed;right:0;top:44px;bottom:0;width:0;background:#fff;border-left:1px solid var(--border);overflow:hidden;transition:width .2s;z-index:150;}
-#props.open{width:220px;}
-#props-in{width:220px;padding:10px;overflow-y:auto;height:100%;}
+#props{position:fixed;right:0;top:44px;bottom:0;width:0;background:#fff;border-left:1px solid var(--border);overflow:hidden;transition:width .2s, bottom .32s cubic-bezier(.34,1.3,.64,1);z-index:150;}
+#props.open{width:252px;}
+body.edit-mode-on #props{bottom:64px;}
+#props-in{width:252px;padding:10px;overflow-y:auto;height:100%;}
 #props-close{position:absolute;top:6px;right:6px;background:none;border:none;cursor:pointer;color:var(--muted);font-size:12px;border-radius:4px;padding:2px 5px;}
 #props-close:hover{background:var(--bg);}
 .pr-sec{margin-bottom:12px;}
@@ -521,6 +522,7 @@ body.conn-mode,.conn-mode .block{cursor:crosshair!important;}
 .pr-btn-row{display:flex;gap:3px;flex-wrap:wrap;}
 .prbtn{padding:3px 7px;border-radius:5px;border:1px solid var(--border);background:#fff;cursor:pointer;font-family:inherit;font-size:10.5px;font-weight:600;color:var(--muted);transition:var(--tr);touch-action:manipulation;}
 .prbtn:hover{background:var(--pale);color:var(--blue);border-color:var(--bblue);}
+.prbtn.active{background:var(--pale);color:var(--blue);border-color:var(--blue);}
 .prbtn.danger{color:#ef4444;border-color:#fecaca;}
 .prbtn.danger:hover{background:#fef2f2;}
 .cdr{display:flex;gap:3px;align-items:center;margin-bottom:3px;}
@@ -635,6 +637,7 @@ body.conn-mode,.conn-mode .block{cursor:crosshair!important;}
   #props{top:90px;}
   #props.open{width:100%!important;border-left:none;border-top:1px solid var(--border);}
   #props-in{width:100%!important;}
+  body.edit-mode-on #props{bottom:112px;} /* 54px nav + 58px toolbar */
   /* Modals full-screen on mobile */
   .modal{width:100%!important;max-width:100%!important;border-radius:16px 16px 0 0;position:fixed;bottom:0;left:0;right:0;margin:0;max-height:85vh;overflow-y:auto;animation:slideUp .2s ease;}
   .mbg{align-items:flex-end!important;}
@@ -2413,18 +2416,30 @@ function manualSave(){
   save();
 }
 function exportBlocks(){
+  const heightTypes=['draw','embed','progress','table','chart','image'];
   return Array.from(document.querySelectorAll('#canvas .block')).map(el=>{
     const img=el.querySelector('img');
     const embedUrl=el.querySelector('.embed-url')?.value||undefined;
-    return{...(el.__d||{}),id:el.id,type:(el.__d?.type||'text'),x:parseFloat(el.style.left),y:parseFloat(el.style.top),
-      w:el.offsetWidth||undefined,h:el.offsetHeight||undefined,sty:el.getAttribute('style')||'',
+    const type=(el.__d?.type||'text');
+    const isTextBlock=!heightTypes.includes(type);
+    let sty=el.getAttribute('style')||'';
+    if(isTextBlock)sty=sty.replace(/\bheight\s*:[^;]+;?\s*/g,''); // text bloklarda height kaydetme
+    return{...(el.__d||{}),id:el.id,type,x:parseFloat(el.style.left),y:parseFloat(el.style.top),
+      w:el.offsetWidth||undefined,
+      h:isTextBlock?undefined:(el.offsetHeight||undefined),
+      sty,
       html:el.querySelector('[contenteditable]')?.innerHTML||'',
       imgSrc:img?img.src:undefined,drawData:el.__dd||undefined,
       chartData:el.__cd||undefined,embedUrl};
   });
 }
 // trigSave: anında yerel önbelleğe yaz (kısa debounce), Firebase'e biraz gecikmeli gönder
-function trigSave(){
+function trigSave(el){
+  // Auto-grow: içerik değişince bloğun yüksekliğini güncelle
+  if(el){
+    var block=el.closest?el.closest('.block'):null;
+    if(block){block.style.height='auto';}
+  }
   setSaveState('unsaved');
   clearTimeout(saveT);clearTimeout(localCacheT);
   localCacheT=setTimeout(function(){syncCurrentNoteToS();writeLocalCache();},400);
@@ -2883,7 +2898,17 @@ function phCheck(el){
 }
 
 // ═══ CANVAS ═══
-function applyTxBase(){document.getElementById('canvas').style.transform=`translate(${cx}px,${cy}px) scale(${zoom})`;document.getElementById('zoom-display').textContent=Math.round(zoom*100)+'%';}
+function applyTxBase(){
+  document.getElementById('canvas').style.transform=`translate(${cx}px,${cy}px) scale(${zoom})`;
+  document.getElementById('zoom-display').textContent=Math.round(zoom*100)+'%';
+  // Dot grid moves and scales with canvas
+  const bg=document.getElementById('canvas-bg');
+  if(bg){
+    const sz=22*zoom;
+    bg.style.backgroundSize=sz+'px '+sz+'px';
+    bg.style.backgroundPosition=(cx%sz)+'px '+(cy%sz)+'px';
+  }
+}
 function applyTx(){applyTxBase();const d=document.getElementById('mob-zoom-display');if(d)d.textContent=Math.round(zoom*100)+'%';}
 // ═══ CANVAS MODE (select / hand) ═══
 var canvasMode = 'select'; // 'select' | 'hand'
@@ -3192,30 +3217,30 @@ function mkH(type,extra=''){return`<div class="bh"><span class="bh-grip">⠿</sp
 function buildBlock(type,opts={}){
   const el=document.createElement('div');el.className=`block b-${type}`;el.id='b'+Date.now()+Math.random().toString(36).slice(2,5);el.__d={type,...opts};el.style.zIndex=++nxtZ;
   const SE='<div class="res-se"></div>',EE='<div class="res-e"></div>';
-  if(type==='text'){el.style.cssText='min-width:140px;width:230px;';el.innerHTML=mkH(type)+`<div class="bi ph-field" contenteditable="true" spellcheck="false" oninput="trigSave();phCheck(this)" data-ph="Yazmaya başla..." onfocus="phFocus(this)" onblur="phBlur(this)"></div>`+SE+EE;}
-  else if(type==='heading'){el.style.cssText='min-width:140px;width:300px;';el.innerHTML=mkH(type)+`<div class="bi ph-field" contenteditable="true" spellcheck="false" oninput="trigSave();phCheck(this)" data-ph="Başlık" onfocus="phFocus(this)" onblur="phBlur(this)"></div>`+EE;}
+  if(type==='text'){el.style.cssText='min-width:140px;width:230px;';el.innerHTML=mkH(type)+`<div class="bi ph-field" contenteditable="true" spellcheck="false" oninput="trigSave(this);phCheck(this)" data-ph="Yazmaya başla..." onfocus="phFocus(this)" onblur="phBlur(this)"></div>`+SE+EE;}
+  else if(type==='heading'){el.style.cssText='min-width:140px;width:300px;';el.innerHTML=mkH(type)+`<div class="bi ph-field" contenteditable="true" spellcheck="false" oninput="trigSave(this);phCheck(this)" data-ph="Başlık" onfocus="phFocus(this)" onblur="phBlur(this)"></div>`+EE;}
   else if(type==='callout'){
     const CV={info:{bg:'#fffbeb',br:'#f59e0b',ico:'🟡'},warn:{bg:'#fef2f2',br:'#ef4444',ico:'⚠️'},tip:{bg:'#f0fdf4',br:'#16a34a',ico:'💡'},note:{bg:'#eff6ff',br:'#3b5bdb',ico:'📘'},err:{bg:'#fdf4ff',br:'#7c3aed',ico:'❌'}};
     const k=opts.variant||'info';const c=CV[k]||CV.info;
     el.style.cssText=`min-width:180px;width:250px;background:${c.bg};border:2px solid ${c.br}!important;`;
-    el.innerHTML=mkH(type)+`<div class="co-in"><span class="co-ico" contenteditable="true" spellcheck="false" oninput="trigSave()">${c.ico}</span><div class="co-txt" contenteditable="true" spellcheck="false" oninput="trigSave()">Not buraya...</div></div>`+SE+EE;
+    el.innerHTML=mkH(type)+`<div class="co-in"><span class="co-ico" contenteditable="true" spellcheck="false" oninput="trigSave(this)">${c.ico}</span><div class="co-txt" contenteditable="true" spellcheck="false" oninput="trigSave(this)">Not buraya...</div></div>`+SE+EE;
   }
-  else if(type==='card'){el.style.cssText='min-width:170px;width:230px;';el.innerHTML=mkH(type)+`<div class="ch" contenteditable="true" spellcheck="false" oninput="trigSave()">Kart Başlığı</div><div class="cb" contenteditable="true" spellcheck="false" oninput="trigSave()">İçerik...</div>`+SE;}
-  else if(type==='code'){el.style.cssText='min-width:190px;width:270px;';el.innerHTML=mkH(type)+`<div class="bi" contenteditable="true" spellcheck="false" oninput="trigSave()">// kod buraya</div>`+SE+EE;}
-  else if(type==='checklist'){el.style.cssText='min-width:160px;width:250px;';el.innerHTML=mkH(type)+`<div class="cl-body"><div class="cl-in"><div class="cl-header"><span>Görevler</span><span class="cl-prog-txt">0/1</span></div><div class="cl-progbar"><div class="cl-progbar-fill" style="width:0%"></div></div><div class="cli"><input type="checkbox" onchange="toggleCL(this)"><div class="ct" contenteditable="true" spellcheck="false" oninput="trigSave()">Görev 1</div></div></div><button class="cl-add" onclick="addCLItem(this)">＋ Ekle</button></div>`+SE;}
+  else if(type==='card'){el.style.cssText='min-width:170px;width:230px;';el.innerHTML=mkH(type)+`<div class="ch" contenteditable="true" spellcheck="false" oninput="trigSave(this)">Kart Başlığı</div><div class="cb" contenteditable="true" spellcheck="false" oninput="trigSave(this)">İçerik...</div>`+SE;}
+  else if(type==='code'){el.style.cssText='min-width:190px;width:270px;';el.innerHTML=mkH(type)+`<div class="bi" contenteditable="true" spellcheck="false" oninput="trigSave(this)">// kod buraya</div>`+SE+EE;}
+  else if(type==='checklist'){el.style.cssText='min-width:160px;width:250px;';el.innerHTML=mkH(type)+`<div class="cl-body"><div class="cl-in"><div class="cl-header"><span>Görevler</span><span class="cl-prog-txt">0/1</span></div><div class="cl-progbar"><div class="cl-progbar-fill" style="width:0%"></div></div><div class="cli"><input type="checkbox" onchange="toggleCL(this)"><div class="ct" contenteditable="true" spellcheck="false" oninput="trigSave(this)">Görev 1</div></div></div><button class="cl-add" onclick="addCLItem(this)">＋ Ekle</button></div>`+SE;}
   else if(type==='table'){
     el.style.cssText='min-width:180px;';el.__td={rows:3,cols:3};
     el.innerHTML=mkH(type)+`<div class="tbl-scroll">`+buildTblHTML(3,3)+`</div><div class="tbl-bar"><button class="bh-btn" onclick="tblAddRow(this)">+ Satır</button><button class="bh-btn" onclick="tblAddCol(this)">+ Sütun</button><button class="bh-btn d" onclick="tblDelRow(this)">− Satır</button></div>`+SE;
   }
-  else if(type==='node'){const col=opts.nc||NODE_COLORS[Math.floor(Math.random()*NODE_COLORS.length)];el.style.cssText='min-width:70px;';el.innerHTML=mkH(type)+`<div class="ni" contenteditable="true" spellcheck="false" style="background:${col.bg};border:2px solid ${col.br};color:${col.tx}" oninput="trigSave()">Düğüm</div>`;el.__d.nc=col;}
-  else if(type==='tree'){el.style.cssText='min-width:160px;width:220px;';el.innerHTML=mkH(type)+`<div class="tr-in"><div class="tn"><div class="tb"></div><div class="tt" contenteditable="true" spellcheck="false" oninput="trigSave()">Kök</div><button class="ta" onclick="addTN(this)">+</button></div></div>`+SE;}
+  else if(type==='node'){const col=opts.nc||NODE_COLORS[Math.floor(Math.random()*NODE_COLORS.length)];el.style.cssText='min-width:70px;';el.innerHTML=mkH(type)+`<div class="ni" contenteditable="true" spellcheck="false" style="background:${col.bg};border:2px solid ${col.br};color:${col.tx}" oninput="trigSave(this)">Düğüm</div>`;el.__d.nc=col;}
+  else if(type==='tree'){el.style.cssText='min-width:160px;width:220px;';el.innerHTML=mkH(type)+`<div class="tr-in"><div class="tn"><div class="tb"></div><div class="tt" contenteditable="true" spellcheck="false" oninput="trigSave(this)">Kök</div><button class="ta" onclick="addTN(this)">+</button></div></div>`+SE;}
   else if(type==='progress'){
     el.style.cssText='min-width:220px;width:270px;';
-    el.innerHTML=mkH(type)+`<div class="pr-in"><div class="pl" contenteditable="true" spellcheck="false" oninput="trigSave()">İLERLEME</div><div class="pv-row"><div><div class="pv">40%</div></div><span class="pv-lbl">Tamamlandı</span></div><div class="pb-outer"><div class="pb" style="width:40%"></div></div><input type="range" min="0" max="100" value="40" oninput="updProg(this)"></div>`+SE;
+    el.innerHTML=mkH(type)+`<div class="pr-in"><div class="pl" contenteditable="true" spellcheck="false" oninput="trigSave(this)">İLERLEME</div><div class="pv-row"><div><div class="pv">40%</div></div><span class="pv-lbl">Tamamlandı</span></div><div class="pb-outer"><div class="pb" style="width:40%"></div></div><input type="range" min="0" max="100" value="40" oninput="updProg(this)"></div>`+SE;
   }
   else if(type==='counter'){
     el.style.cssText='min-width:160px;width:200px;';
-    el.innerHTML=mkH(type)+`<div class="ctr-in"><div class="cl" contenteditable="true" spellcheck="false" oninput="trigSave()">SAYAÇ</div><div class="cv">0</div><div class="cbtns"><button class="cb2" onclick="adjCtr(this,-1)">−</button><button class="cb2" onclick="adjCtr(this,1)">+</button></div></div>`;
+    el.innerHTML=mkH(type)+`<div class="ctr-in"><div class="cl" contenteditable="true" spellcheck="false" oninput="trigSave(this)">SAYAÇ</div><div class="cv">0</div><div class="cbtns"><button class="cb2" onclick="adjCtr(this,-1)">−</button><button class="cb2" onclick="adjCtr(this,1)">+</button></div></div>`;
   }
   else if(type==='shape'){
     const v=opts.variant||'rect';const shp=SHAPES.find(s=>s.v===v)||SHAPES[0];
@@ -3254,7 +3279,7 @@ function loadEmbed(inp){
   if(iframe){iframe.src=url;el.__d.embedUrl=url;trigSave();toast('Yükleniyor...');}
 }
 
-function buildTblHTML(rows,cols){let t='<table>';for(let r=0;r<rows;r++){t+='<tr>';for(let c=0;c<cols;c++){if(r===0)t+=`<th contenteditable="true" spellcheck="false" oninput="trigSave()">Başlık ${c+1}</th>`;else t+=`<td contenteditable="true" spellcheck="false" oninput="trigSave()">Hücre</td>`;}t+='</tr>';}return t+'</table>';}
+function buildTblHTML(rows,cols){let t='<table>';for(let r=0;r<rows;r++){t+='<tr>';for(let c=0;c<cols;c++){if(r===0)t+=`<th contenteditable="true" spellcheck="false" oninput="trigSave(this)">Başlık ${c+1}</th>`;else t+=`<td contenteditable="true" spellcheck="false" oninput="trigSave(this)">Hücre</td>`;}t+='</tr>';}return t+'</table>';}
 function tblAddRow(btn){const tbl=btn.closest('.block').querySelector('table');if(!tbl)return;const cols=tbl.rows[0]?.cells.length||3;const tr=document.createElement('tr');for(let c=0;c<cols;c++){const td=document.createElement('td');td.contentEditable='true';td.spellcheck=false;td.oninput=trigSave;td.textContent='Hücre';tr.appendChild(td);}tbl.appendChild(tr);trigSave();}
 function tblAddCol(btn){const tbl=btn.closest('.block').querySelector('table');if(!tbl)return;Array.from(tbl.rows).forEach((tr,ri)=>{const cell=ri===0?document.createElement('th'):document.createElement('td');cell.contentEditable='true';cell.spellcheck=false;cell.oninput=trigSave;cell.textContent=ri===0?'Başlık':'Hücre';tr.appendChild(cell);});trigSave();}
 function tblDelRow(btn){const tbl=btn.closest('.block').querySelector('table');if(tbl&&tbl.rows.length>1)tbl.deleteRow(tbl.rows.length-1);trigSave();}
@@ -3289,6 +3314,7 @@ function restoreBlock(b){
   if(isTextBlock)sty=sty.replace(/\bheight\s*:[^;]+;?/g,'');
   el.style.cssText=sty;el.style.left=b.x+'px';el.style.top=b.y+'px';if(b.w)el.style.width=b.w+'px';
   if(b.h&&!isTextBlock)el.style.height=b.h+'px';
+  if(isTextBlock)el.style.height='auto'; // içerik büyüdükçe blok genişlesin
   el.__d={...b};
   if(b.id)el.id=b.id;
   if(b.html){const ce=el.querySelector('[contenteditable]');if(ce){ce.innerHTML=b.html;if(ce.classList.contains('ph-field'))phBlur(ce);}}
@@ -3663,43 +3689,316 @@ function updProps(el){
   const type=el.__d?.type||'text';
   const cont=document.getElementById('props-content');
   cont.innerHTML='';
-  let html=`<div class="pr-sec"><div class="pr-sec-t">⚙ Genel</div>
-  <div class="pr"><div class="pr-lbl">Arka Plan</div><div class="pr-row">
-    <input type="color" class="pr-col" id="pp-bg" value="${rgb2hex(el.style.backgroundColor)||'#ffffff'}">
-    <input class="pr-inp" style="flex:1;margin-left:5px" id="pp-bg-t" placeholder="#ffffff" value="${el.style.backgroundColor||''}">
-  </div></div>
-  <div class="pr"><div class="pr-lbl">Opaklık <b id="pr-op">${Math.round((parseFloat(el.style.opacity)||1)*100)}%</b></div>
-    <input class="pr-inp" type="range" min="10" max="100" id="pp-op" value="${Math.round((parseFloat(el.style.opacity)||1)*100)}">
+  const curBg=rgb2hex(el.style.backgroundColor)||'#ffffff';
+  const curOp=Math.round((parseFloat(el.style.opacity)||1)*100);
+  const curRad=parseInt(el.style.borderRadius)||10;
+  const curBdW=parseInt(el.style.borderWidth)||0;
+  const curBdC=rgb2hex(el.style.borderColor)||'#c7d2fe';
+  const curBdS=el.style.borderStyle||'solid';
+  const curRot=parseInt((el.style.transform||'').replace(/[^-\d]/g,''))||0;
+  const curW=parseInt(el.style.width)||200;
+  const hasShadow=el.style.boxShadow&&el.style.boxShadow!=='none';
+  const shadowIntensity=hasShadow?50:0;
+  const textTypes=['text','heading','callout','card','code'];
+  const isTextType=textTypes.includes(type);
+
+  // ── GENEL bölümü ──
+  let html=`
+  <div class="pr-sec">
+    <div class="pr-sec-t">🎨 Arka Plan</div>
+    <div class="pr"><div class="pr-lbl">Renk</div>
+      <div class="pr-row">
+        <input type="color" class="pr-col" id="pp-bg" value="${curBg}">
+        <input class="pr-inp" style="flex:1;margin-left:5px" id="pp-bg-t" placeholder="#ffffff veya transparent" value="${el.style.backgroundColor||''}">
+      </div>
+    </div>
+    <div class="pr"><div class="pr-lbl">Hazır Renkler</div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:2px" id="pp-preset-colors"></div>
+    </div>
+    <div class="pr"><div class="pr-lbl">Gradyan (opsiyonel)</div>
+      <div class="pr-row" style="gap:4px">
+        <input type="color" id="pp-grad1" value="#4f46e5" style="width:30px;height:26px;border:none;cursor:pointer;border-radius:4px">
+        <input type="color" id="pp-grad2" value="#818cf8" style="width:30px;height:26px;border:none;cursor:pointer;border-radius:4px">
+        <select class="pr-inp" id="pp-grad-dir" style="flex:1;font-size:10px">
+          <option value="135deg">↘ Çapraz</option>
+          <option value="90deg">→ Yatay</option>
+          <option value="180deg">↓ Dikey</option>
+          <option value="45deg">↗ Ters</option>
+        </select>
+        <button class="prbtn" id="pp-grad-apply" style="white-space:nowrap">Uygula</button>
+      </div>
+    </div>
+    <div class="pr"><div class="pr-lbl">Şeffaflık <b id="pr-op">${curOp}%</b></div>
+      <input class="pr-inp" type="range" min="10" max="100" id="pp-op" value="${curOp}">
+    </div>
   </div>
-  <div class="pr"><div class="pr-lbl">Köşe <b id="pr-rad">${parseInt(el.style.borderRadius)||10}px</b></div>
-    <input class="pr-inp" type="range" min="0" max="32" id="pp-rad" value="${parseInt(el.style.borderRadius)||10}">
+
+  <div class="pr-sec">
+    <div class="pr-sec-t">⬜ Kenarlık & Köşe</div>
+    <div class="pr"><div class="pr-lbl">Kenarlık Stili</div>
+      <div class="pr-btn-row" id="pp-bd-style-row">
+        <button class="prbtn ${curBdS==='solid'||!curBdW?'active':''}" data-v="solid">─ Düz</button>
+        <button class="prbtn ${curBdS==='dashed'?'active':''}" data-v="dashed">╌ Kesik</button>
+        <button class="prbtn ${curBdS==='dotted'?'active':''}" data-v="dotted">⋯ Nokta</button>
+        <button class="prbtn ${curBdS==='double'?'active':''}" data-v="double">═ Çift</button>
+      </div>
+    </div>
+    <div class="pr"><div class="pr-lbl">Kenarlık Rengi</div>
+      <div class="pr-row">
+        <input type="color" class="pr-col" id="pp-bd-color" value="${curBdC}">
+        <input class="pr-inp" style="flex:1;margin-left:5px" id="pp-bd-color-t" value="${curBdC}">
+      </div>
+    </div>
+    <div class="pr"><div class="pr-lbl">Kenarlık Kalınlığı <b id="pr-bdw">${curBdW}px</b></div>
+      <input class="pr-inp" type="range" min="0" max="8" id="pp-bdw" value="${curBdW}">
+    </div>
+    <div class="pr"><div class="pr-lbl">Köşe Yuvarlaklığı <b id="pr-rad">${curRad}px</b></div>
+      <input class="pr-inp" type="range" min="0" max="40" id="pp-rad" value="${curRad}">
+    </div>
   </div>
-  <div class="pr"><div class="pr-lbl">Gölge <input type="checkbox" id="pp-sh" ${el.style.boxShadow&&el.style.boxShadow!=='none'?'checked':''} style="accent-color:var(--blue);margin-left:4px"></div></div>
+
+  <div class="pr-sec">
+    <div class="pr-sec-t">💫 Gölge & Efekt</div>
+    <div class="pr"><div class="pr-lbl">Gölge <b id="pr-sh-val">${shadowIntensity}%</b></div>
+      <input class="pr-inp" type="range" min="0" max="100" id="pp-sh" value="${shadowIntensity}">
+    </div>
+    <div class="pr"><div class="pr-lbl">Hazır Gölgeler</div>
+      <div class="pr-btn-row">
+        <button class="prbtn" id="pp-sh-none">Yok</button>
+        <button class="prbtn" id="pp-sh-soft">Hafif</button>
+        <button class="prbtn" id="pp-sh-med">Orta</button>
+        <button class="prbtn" id="pp-sh-strong">Güçlü</button>
+      </div>
+    </div>
+    <div class="pr"><div class="pr-lbl">Bulanıklaştır <b id="pr-blur">0px</b></div>
+      <input class="pr-inp" type="range" min="0" max="20" id="pp-blur" value="${parseInt((el.style.filter||'').replace(/[^0-9]/g,''))||0}">
+    </div>
+  </div>
+
+  <div class="pr-sec">
+    <div class="pr-sec-t">📐 Boyut & Konum</div>
+    <div class="pr"><div class="pr-lbl">Genişlik <b id="pr-w">${curW}px</b></div>
+      <input class="pr-inp" type="range" min="80" max="800" id="pp-w" value="${curW}">
+    </div>
+    <div class="pr"><div class="pr-lbl">Döndür <b id="pr-rot">${curRot}°</b></div>
+      <input class="pr-inp" type="range" min="-180" max="180" id="pp-rot" value="${curRot}">
+    </div>
+    <div class="pr"><div class="pr-lbl">Katman</div>
+      <div class="pr-btn-row">
+        <button class="prbtn" id="pp-frt">⬆ En Öne</button>
+        <button class="prbtn" id="pp-bck">⬇ En Arkaya</button>
+      </div>
+    </div>
+    <div class="pr"><div class="pr-lbl">Konum (X / Y)</div>
+      <div class="pr-row" style="gap:4px">
+        <input class="pr-inp" type="number" id="pp-px" value="${Math.round(parseFloat(el.style.left)||0)}" style="flex:1" placeholder="X">
+        <input class="pr-inp" type="number" id="pp-py" value="${Math.round(parseFloat(el.style.top)||0)}" style="flex:1" placeholder="Y">
+      </div>
+    </div>
+  </div>
+  `;
+
+  // ── TÜR-ÖZEL bölümler ──
+  if(isTextType){
+    const ce=el.querySelector('[contenteditable]');
+    const curFz=parseInt(ce?.style.fontSize)||0;
+    const curFw=ce?.style.fontWeight||'';
+    const curTc=rgb2hex(ce?.style.color)||'#0f172a';
+    const curTA=ce?.style.textAlign||'left';
+    html+=`<div class="pr-sec"><div class="pr-sec-t">✏ Metin Stili</div>
+      <div class="pr"><div class="pr-lbl">Yazı Rengi</div>
+        <div class="pr-row">
+          <input type="color" class="pr-col" id="pp-tc2" value="${curTc}">
+          <div style="display:flex;flex-wrap:wrap;gap:3px;margin-left:5px" id="pp-tc2-presets"></div>
+        </div>
+      </div>
+      <div class="pr"><div class="pr-lbl">Yazı Boyutu <b id="pr-fz">${curFz||'varsayılan'}</b></div>
+        <input class="pr-inp" type="range" min="8" max="72" id="pp-fz" value="${curFz||13}">
+      </div>
+      <div class="pr"><div class="pr-lbl">Kalınlık</div>
+        <div class="pr-btn-row" id="pp-fw-row">
+          <button class="prbtn ${curFw==='300'?'active':''}" data-v="300" style="font-weight:300">İnce</button>
+          <button class="prbtn ${!curFw||curFw==='400'||curFw==='normal'?'active':''}" data-v="400" style="font-weight:400">Normal</button>
+          <button class="prbtn ${curFw==='600'?'active':''}" data-v="600" style="font-weight:600">Orta</button>
+          <button class="prbtn ${curFw==='700'||curFw==='bold'?'active':''}" data-v="700" style="font-weight:700">Kalın</button>
+          <button class="prbtn ${curFw==='900'?'active':''}" data-v="900" style="font-weight:900">Tam</button>
+        </div>
+      </div>
+      <div class="pr"><div class="pr-lbl">Hizalama</div>
+        <div class="pr-btn-row" id="pp-ta-row">
+          <button class="prbtn ${curTA==='left'||!curTA?'active':''}" data-v="left">◀ Sol</button>
+          <button class="prbtn ${curTA==='center'?'active':''}" data-v="center">◆ Orta</button>
+          <button class="prbtn ${curTA==='right'?'active':''}" data-v="right">▶ Sağ</button>
+        </div>
+      </div>
+      <div class="pr"><div class="pr-lbl">Satır Aralığı <b id="pr-lh">varsayılan</b></div>
+        <input class="pr-inp" type="range" min="10" max="30" id="pp-lh" value="${Math.round((parseFloat(ce?.style.lineHeight)||1.75)*10)}">
+      </div>
+      <div class="pr"><div class="pr-lbl">Harf Aralığı <b id="pr-ls">0px</b></div>
+        <input class="pr-inp" type="range" min="-2" max="10" id="pp-ls" value="${parseFloat(ce?.style.letterSpacing)||0}">
+      </div>
+    </div>`;
+  }
+
+  if(type==='callout'){html+=`<div class="pr-sec"><div class="pr-sec-t">🟡 Yapışkan Not Stili</div><div class="pr"><div class="pr-lbl">Hazır Temalar</div><div class="pr-btn-row"><button class="prbtn" id="pp-cv-info">📘 Not</button><button class="prbtn" id="pp-cv-warn">⚠ Uyarı</button><button class="prbtn" id="pp-cv-tip">💡 İpucu</button><button class="prbtn" id="pp-cv-err">❌ Hata</button></div></div></div>`;}
+  else if(type==='image'){html+=`<div class="pr-sec"><div class="pr-sec-t">🖼 Görsel</div>
+    <div class="pr"><div class="pr-lbl">Genişlik <b id="pr-iw">${parseInt(el.querySelector('img')?.style.width)||260}px</b></div>
+      <input class="pr-inp" type="range" min="50" max="800" id="pp-iw" value="${parseInt(el.querySelector('img')?.style.width)||260}">
+    </div>
+    <div class="pr"><div class="pr-lbl">Görsel Köşe <b id="pr-img-rad">7px</b></div>
+      <input class="pr-inp" type="range" min="0" max="40" id="pp-img-rad" value="${parseInt(el.querySelector('img')?.style.borderRadius)||7}">
+    </div>
+    <div class="pr"><div class="pr-lbl">Filtre</div>
+      <div class="pr-btn-row">
+        <button class="prbtn" id="pp-img-none">Normal</button>
+        <button class="prbtn" id="pp-img-gray">Gri</button>
+        <button class="prbtn" id="pp-img-sepia">Sepya</button>
+        <button class="prbtn" id="pp-img-inv">Ters</button>
+      </div>
+    </div>
+    <div class="pr"><button class="prbtn" id="pp-rimg">🔄 Görseli Değiştir</button></div>
+  </div>`;}
+  else if(type==='shape'){html+=`<div class="pr-sec"><div class="pr-sec-t">⬟ Şekil</div>
+    <div class="pr"><div class="pr-lbl">Dolgu Rengi</div><input type="color" class="pr-col" id="pp-sf" value="#eff6ff"></div>
+    <div class="pr"><div class="pr-lbl">Kenarlık Rengi</div><input type="color" class="pr-col" id="pp-ss" value="#3b5bdb"></div>
+    <div class="pr"><div class="pr-lbl">Şekil Değiştir</div><div class="sp-grid" style="grid-template-columns:repeat(4,1fr);gap:3px" id="pp-sg"></div></div>
+  </div>`;}
+  else if(type==='chart'){html+=`<div class="pr-sec"><div class="pr-sec-t">📊 Grafik</div>
+    <div class="pr"><div class="pr-lbl">Grafik Türü</div>
+      <select class="pr-inp" id="pp-ct">
+        <option value="bar" ${(el.__d?.chartType||'bar')==='bar'?'selected':''}>📊 Çubuk</option>
+        <option value="line" ${el.__d?.chartType==='line'?'selected':''}>📈 Çizgi</option>
+        <option value="pie" ${el.__d?.chartType==='pie'?'selected':''}>🥧 Pasta</option>
+      </select>
+    </div>
+    <div class="pr"><div class="pr-lbl">Veri</div><div id="chart-pr-rows"></div>
+      <div class="pr-btn-row" style="margin-top:4px">
+        <button class="prbtn" id="pp-ca">+ Satır Ekle</button>
+        <button class="prbtn" id="pp-cu">🔄 Güncelle</button>
+      </div>
+    </div>
+  </div>`;}
+  else if(type==='table'){html+=`<div class="pr-sec"><div class="pr-sec-t">⊞ Tablo</div>
+    <div class="pr-btn-row">
+      <button class="prbtn" id="pp-tr">+ Satır</button>
+      <button class="prbtn" id="pp-tc">+ Sütun</button>
+      <button class="prbtn danger" id="pp-td">− Satır</button>
+    </div>
+  </div>`;}
+  else if(type==='node'){html+=`<div class="pr-sec"><div class="pr-sec-t">◉ Düğüm</div>
+    <div class="pr"><div class="pr-lbl">Renk Teması</div><div class="pr-btn-row" id="pp-nc"></div></div>
+  </div>`;}
+  else if(type==='draw'){html+=`<div class="pr-sec"><div class="pr-sec-t">✏ Çizim</div>
+    <div class="pr-btn-row">
+      <button class="prbtn" id="pp-de">✏ Çizim Modu</button>
+      <button class="prbtn danger" id="pp-dc">🗑 Temizle</button>
+    </div>
+  </div>`;}
+  else if(type==='progress'){html+=`<div class="pr-sec"><div class="pr-sec-t">📶 İlerleme</div>
+    <div class="pr"><div class="pr-lbl">Çubuk Rengi</div><input type="color" class="pr-col" id="pp-pc" value="${rgb2hex(el.querySelector('.pb')?.style.background)||'#3b5bdb'}"></div>
+    <div class="pr"><div class="pr-lbl">Hazır Renkler</div>
+      <div class="pr-btn-row" id="pp-prog-colors"></div>
+    </div>
+  </div>`;}
+
+  // ── EYLEMLER ──
+  html+=`<div class="pr-sec"><div class="pr-sec-t">⟶ Eylemler</div>
+    <div class="pr-btn-row">
+      <button class="prbtn" id="pp-conn">⟶ Bağla</button>
+      <button class="prbtn" id="pp-dup">⎘ Çoğalt</button>
+    </div>
+    <div style="margin-top:5px"><button class="prbtn danger" style="width:100%" id="pp-del">🗑 Bloğu Sil</button></div>
   </div>`;
-  if(type==='callout'){html+=`<div class="pr-sec"><div class="pr-sec-t">🟡 Yapışkan Not</div><div class="pr"><div class="pr-lbl">Stil</div><div class="pr-btn-row"><button class="prbtn" id="pp-cv-info">📘 Not</button><button class="prbtn" id="pp-cv-warn">⚠ Uyarı</button><button class="prbtn" id="pp-cv-tip">💡 İpucu</button><button class="prbtn" id="pp-cv-err">❌ Hata</button></div></div><div class="pr"><div class="pr-lbl">Kenarlık</div><input type="color" class="pr-col" id="pp-bd" value="#f59e0b"></div></div>`;}
-  else if(type==='image'){html+=`<div class="pr-sec"><div class="pr-sec-t">🖼 Görsel</div><div class="pr"><div class="pr-lbl">Genişlik <b id="pr-iw">${parseInt(el.querySelector('img')?.style.width)||260}px</b></div><input class="pr-inp" type="range" min="50" max="800" id="pp-iw" value="${parseInt(el.querySelector('img')?.style.width)||260}"></div><div class="pr"><button class="prbtn" id="pp-rimg">🔄 Değiştir</button></div></div>`;}
-  else if(type==='shape'){html+=`<div class="pr-sec"><div class="pr-sec-t">⬟ Şekil</div><div class="pr"><div class="pr-lbl">Dolgu</div><input type="color" class="pr-col" id="pp-sf" value="#eff6ff"></div><div class="pr"><div class="pr-lbl">Kenarlık</div><input type="color" class="pr-col" id="pp-ss" value="#3b5bdb"></div><div class="pr"><div class="pr-lbl">Şekil</div><div class="sp-grid" style="grid-template-columns:repeat(4,1fr);gap:3px" id="pp-sg"></div></div></div>`;}
-  else if(type==='chart'){html+=`<div class="pr-sec"><div class="pr-sec-t">📊 Grafik</div><div class="pr"><div class="pr-lbl">Tür</div><select class="pr-inp" id="pp-ct"><option value="bar" ${(el.__d?.chartType||'bar')==='bar'?'selected':''}>Çubuk</option><option value="line" ${el.__d?.chartType==='line'?'selected':''}>Çizgi</option><option value="pie" ${el.__d?.chartType==='pie'?'selected':''}>Pasta</option></select></div><div class="pr"><div class="pr-lbl">Veri</div><div id="chart-pr-rows"></div><div class="pr-btn-row" style="margin-top:4px"><button class="prbtn" id="pp-ca">+ Ekle</button><button class="prbtn" id="pp-cu">🔄 Güncelle</button></div></div></div>`;}
-  else if(type==='table'){html+=`<div class="pr-sec"><div class="pr-sec-t">⊞ Tablo</div><div class="pr-btn-row"><button class="prbtn" id="pp-tr">+ Satır</button><button class="prbtn" id="pp-tc">+ Sütun</button><button class="prbtn danger" id="pp-td">− Satır</button></div></div>`;}
-  else if(type==='node'){html+=`<div class="pr-sec"><div class="pr-sec-t">◉ Düğüm</div><div class="pr"><div class="pr-lbl">Renk</div><div class="pr-btn-row" id="pp-nc"></div></div></div>`;}
-  else if(type==='draw'){html+=`<div class="pr-sec"><div class="pr-sec-t">✏ Çizim</div><div class="pr-btn-row"><button class="prbtn" id="pp-de">✏ Çizim Modu</button><button class="prbtn danger" id="pp-dc">🗑 Temizle</button></div></div>`;}
-  else if(type==='progress'){html+=`<div class="pr-sec"><div class="pr-sec-t">📶 İlerleme</div><div class="pr"><div class="pr-lbl">Çubuk Rengi</div><input type="color" class="pr-col" id="pp-pc" value="#3b5bdb"></div></div>`;}
-  else if(type==='text'||type==='heading'){html+=`<div class="pr-sec"><div class="pr-sec-t">✏ Metin</div><div class="pr"><div class="pr-lbl">Yazı Rengi</div><input type="color" class="pr-col" id="pp-tc2" value="#0f172a"></div></div>`;}
-  html+=`<div class="pr-sec"><div class="pr-sec-t">⟶ Eylemler</div><div class="pr-btn-row"><button class="prbtn" id="pp-conn">⟶ Bağla</button><button class="prbtn" id="pp-dup">⎘ Çoğalt</button><button class="prbtn" id="pp-frt">⬆ Öne</button></div><div style="margin-top:5px"><button class="prbtn danger" style="width:100%" id="pp-del">🗑 Sil</button></div></div>`;
+
   cont.innerHTML=html;
-  // FIX: bind all via JS with closure over el
   const g=id=>document.getElementById(id);
   const bind=(id,ev,fn)=>{const e=g(id);if(e)e.addEventListener(ev,fn);};
-  bind('pp-bg','input',()=>{el.style.backgroundColor=g('pp-bg').value;if(g('pp-bg-t'))g('pp-bg-t').value=g('pp-bg').value;trigSave();});
-  bind('pp-bg-t','input',()=>{el.style.backgroundColor=g('pp-bg-t').value;if(g('pp-bg'))g('pp-bg').value=rgb2hex(g('pp-bg-t').value)||'#ffffff';trigSave();});
+
+  // Preset colors
+  const PRESETS=['#ffffff','#f8faff','#fffbeb','#fef2f2','#f0fdf4','#eff6ff','#fdf4ff','#1e293b','#0f172a','transparent'];
+  const pc=g('pp-preset-colors');
+  if(pc)PRESETS.forEach(c=>{const d=document.createElement('div');d.style.cssText=`width:20px;height:20px;border-radius:5px;cursor:pointer;border:2px solid var(--border);background:${c==='transparent'?'repeating-conic-gradient(#ccc 0% 25%,#fff 0% 50%) 0 0/8px 8px':c};flex-shrink:0;`;d.title=c;d.onclick=()=>{el.style.background='';el.style.backgroundImage='';el.style.backgroundColor=c==='transparent'?'transparent':c;if(g('pp-bg'))g('pp-bg').value=c==='transparent'?'#ffffff':c;if(g('pp-bg-t'))g('pp-bg-t').value=c;trigSave();};pc.appendChild(d);});
+
+  // Text color presets
+  const TCP=['#0f172a','#1e293b','#64748b','#ef4444','#f97316','#eab308','#22c55e','#3b82f6','#8b5cf6','#ec4899'];
+  const tc2p=g('pp-tc2-presets');
+  if(tc2p)TCP.forEach(c=>{const d=document.createElement('div');d.style.cssText=`width:18px;height:18px;border-radius:4px;cursor:pointer;background:${c};border:2px solid var(--border);flex-shrink:0;`;d.onclick=()=>{const ce2=el.querySelector('[contenteditable]');if(ce2)ce2.style.color=c;if(g('pp-tc2'))g('pp-tc2').value=rgb2hex(c)||c;trigSave();};tc2p.appendChild(d);});
+
+  // BG
+  bind('pp-bg','input',()=>{el.style.backgroundImage='';el.style.backgroundColor=g('pp-bg').value;if(g('pp-bg-t'))g('pp-bg-t').value=g('pp-bg').value;trigSave();});
+  bind('pp-bg-t','input',()=>{el.style.backgroundImage='';el.style.backgroundColor=g('pp-bg-t').value;if(g('pp-bg'))g('pp-bg').value=rgb2hex(g('pp-bg-t').value)||'#ffffff';trigSave();});
+
+  // Gradient
+  bind('pp-grad-apply','click',()=>{const c1=g('pp-grad1').value,c2=g('pp-grad2').value,dir=g('pp-grad-dir').value;el.style.background=`linear-gradient(${dir},${c1},${c2})`;trigSave();});
+
+  // Opacity
   bind('pp-op','input',()=>{el.style.opacity=g('pp-op').value/100;if(g('pr-op'))g('pr-op').textContent=g('pp-op').value+'%';trigSave();});
+
+  // Border style
+  const bdStyleRow=g('pp-bd-style-row');
+  if(bdStyleRow)bdStyleRow.querySelectorAll('[data-v]').forEach(btn=>{btn.addEventListener('click',()=>{const v=btn.dataset.v;bdStyleRow.querySelectorAll('[data-v]').forEach(b=>b.classList.remove('active'));btn.classList.add('active');el.style.borderStyle=v;if(!parseInt(el.style.borderWidth))el.style.borderWidth='1.5px';trigSave();});});
+
+  // Border color
+  bind('pp-bd-color','input',()=>{el.style.borderColor=g('pp-bd-color').value;if(g('pp-bd-color-t'))g('pp-bd-color-t').value=g('pp-bd-color').value;trigSave();});
+  bind('pp-bd-color-t','input',()=>{el.style.borderColor=g('pp-bd-color-t').value;if(g('pp-bd-color'))g('pp-bd-color').value=rgb2hex(g('pp-bd-color-t').value)||'#c7d2fe';trigSave();});
+  bind('pp-bdw','input',()=>{const v=g('pp-bdw').value;el.style.borderWidth=v+'px';el.style.borderStyle=el.style.borderStyle||'solid';if(g('pr-bdw'))g('pr-bdw').textContent=v+'px';trigSave();});
+
+  // Border radius
   bind('pp-rad','input',()=>{el.style.borderRadius=g('pp-rad').value+'px';if(g('pr-rad'))g('pr-rad').textContent=g('pp-rad').value+'px';trigSave();});
-  bind('pp-sh','change',()=>{el.style.boxShadow=g('pp-sh').checked?'0 8px 24px rgba(59,91,219,.15)':'none';trigSave();});
-  if(type==='callout'){
-    ['info','warn','tip','err'].forEach(k=>bind('pp-cv-'+k,'click',()=>setCV(el,k)));
-    bind('pp-bd','input',()=>{el.style.borderColor=g('pp-bd').value;trigSave();});
+
+  // Shadow slider
+  bind('pp-sh','input',()=>{
+    const v=parseInt(g('pp-sh').value);if(g('pr-sh-val'))g('pr-sh-val').textContent=v+'%';
+    if(v===0){el.style.boxShadow='none';}
+    else{const a=v/100;el.style.boxShadow=`0 ${4+v/10}px ${8+v/4}px rgba(0,0,0,${(a*0.18).toFixed(2)}),0 1px 4px rgba(0,0,0,${(a*0.08).toFixed(2)})`;}
+    trigSave();
+  });
+  bind('pp-sh-none','click',()=>{el.style.boxShadow='none';if(g('pp-sh'))g('pp-sh').value=0;if(g('pr-sh-val'))g('pr-sh-val').textContent='0%';trigSave();});
+  bind('pp-sh-soft','click',()=>{el.style.boxShadow='0 1px 4px rgba(0,0,0,.06),0 2px 8px rgba(0,0,0,.04)';if(g('pp-sh'))g('pp-sh').value=25;trigSave();});
+  bind('pp-sh-med','click',()=>{el.style.boxShadow='0 4px 16px rgba(0,0,0,.1),0 1px 4px rgba(0,0,0,.06)';if(g('pp-sh'))g('pp-sh').value=55;trigSave();});
+  bind('pp-sh-strong','click',()=>{el.style.boxShadow='0 12px 32px rgba(0,0,0,.18),0 2px 8px rgba(0,0,0,.1)';if(g('pp-sh'))g('pp-sh').value=85;trigSave();});
+
+  // Blur
+  bind('pp-blur','input',()=>{const v=g('pp-blur').value;el.style.filter=v>0?`blur(${v}px)`:'';if(g('pr-blur'))g('pr-blur').textContent=v+'px';trigSave();});
+
+  // Width
+  bind('pp-w','input',()=>{const v=g('pp-w').value;el.style.width=v+'px';if(g('pr-w'))g('pr-w').textContent=v+'px';trigSave();});
+
+  // Rotation
+  bind('pp-rot','input',()=>{const v=g('pp-rot').value;el.style.transform=v!=='0'?`rotate(${v}deg)`:'';if(g('pr-rot'))g('pr-rot').textContent=v+'°';trigSave();});
+
+  // Position X/Y
+  bind('pp-px','change',()=>{el.style.left=g('pp-px').value+'px';trigSave();});
+  bind('pp-py','change',()=>{el.style.top=g('pp-py').value+'px';trigSave();});
+
+  // Z-index
+  bind('pp-frt','click',()=>{el.style.zIndex=++nxtZ;toast('⬆ En öne alındı');});
+  bind('pp-bck','click',()=>{el.style.zIndex=1;toast('⬇ En arkaya alındı');});
+
+  // Text style controls
+  if(isTextType){
+    const ce=el.querySelector('[contenteditable]');
+    bind('pp-tc2','input',()=>{if(ce)ce.style.color=g('pp-tc2').value;trigSave();});
+    bind('pp-fz','input',()=>{const v=g('pp-fz').value;if(ce)ce.style.fontSize=v+'px';if(g('pr-fz'))g('pr-fz').textContent=v+'px';trigSave();});
+    const fwRow=g('pp-fw-row');
+    if(fwRow)fwRow.querySelectorAll('[data-v]').forEach(btn=>{btn.addEventListener('click',()=>{fwRow.querySelectorAll('[data-v]').forEach(b=>b.classList.remove('active'));btn.classList.add('active');if(ce)ce.style.fontWeight=btn.dataset.v;trigSave();});});
+    const taRow=g('pp-ta-row');
+    if(taRow)taRow.querySelectorAll('[data-v]').forEach(btn=>{btn.addEventListener('click',()=>{taRow.querySelectorAll('[data-v]').forEach(b=>b.classList.remove('active'));btn.classList.add('active');if(ce)ce.style.textAlign=btn.dataset.v;trigSave();});});
+    bind('pp-lh','input',()=>{const v=g('pp-lh').value/10;if(ce)ce.style.lineHeight=v;if(g('pr-lh'))g('pr-lh').textContent=v.toFixed(1);trigSave();});
+    bind('pp-ls','input',()=>{const v=g('pp-ls').value;if(ce)ce.style.letterSpacing=v+'px';if(g('pr-ls'))g('pr-ls').textContent=v+'px';trigSave();});
   }
-  if(type==='image'){bind('pp-iw','input',()=>resImg(el,g('pp-iw').value));bind('pp-rimg','click',()=>replaceImg(el));}
+
+  // Type-specific
+  if(type==='callout'){['info','warn','tip','err'].forEach(k=>bind('pp-cv-'+k,'click',()=>setCV(el,k)));}
+  if(type==='image'){
+    bind('pp-iw','input',()=>resImg(el,g('pp-iw').value));
+    bind('pp-img-rad','input',()=>{const img=el.querySelector('img');if(img){img.style.borderRadius=g('pp-img-rad').value+'px';if(g('pr-img-rad'))g('pr-img-rad').textContent=g('pp-img-rad').value+'px';}trigSave();});
+    bind('pp-img-none','click',()=>{const img=el.querySelector('img');if(img)img.style.filter='';trigSave();});
+    bind('pp-img-gray','click',()=>{const img=el.querySelector('img');if(img)img.style.filter='grayscale(100%)';trigSave();});
+    bind('pp-img-sepia','click',()=>{const img=el.querySelector('img');if(img)img.style.filter='sepia(100%)';trigSave();});
+    bind('pp-img-inv','click',()=>{const img=el.querySelector('img');if(img)img.style.filter='invert(100%)';trigSave();});
+    bind('pp-rimg','click',()=>replaceImg(el));
+  }
   if(type==='shape'){
     bind('pp-sf','input',()=>updShapeCol(el,'fill',g('pp-sf').value));
     bind('pp-ss','input',()=>updShapeCol(el,'stroke',g('pp-ss').value));
@@ -3718,11 +4017,14 @@ function updProps(el){
   }
   if(type==='node'){const nc=g('pp-nc');if(nc){NODE_COLORS.forEach((c,i)=>{const d=document.createElement('div');d.style.cssText=`width:20px;height:20px;border-radius:50%;background:${c.bg};border:2px solid ${c.br};cursor:pointer`;d.onclick=()=>applyNC(el,i);nc.appendChild(d);});}}
   if(type==='draw'){bind('pp-de','click',()=>enterDraw(el));bind('pp-dc','click',()=>clrDrwBlock(el));}
-  if(type==='progress'){bind('pp-pc','input',()=>{const pb=el.querySelector('.pb');if(pb)pb.style.background=g('pp-pc').value;trigSave();});}
-  if(type==='text'||type==='heading'){bind('pp-tc2','input',()=>{const ce=el.querySelector('[contenteditable]');if(ce)ce.style.color=g('pp-tc2').value;trigSave();});}
+  if(type==='progress'){
+    const progColors=[{c:'#4f46e5',n:'Mor'},{c:'#22c55e',n:'Yeşil'},{c:'#f97316',n:'Turuncu'},{c:'#ef4444',n:'Kırmızı'},{c:'#0ea5e9',n:'Mavi'},{c:'#ec4899',n:'Pembe'}];
+    const pcp=g('pp-prog-colors');
+    if(pcp)progColors.forEach(p=>{const b=document.createElement('button');b.className='prbtn';b.innerHTML=`<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${p.c};margin-right:3px;vertical-align:middle"></span>${p.n}`;b.onclick=()=>{const pb=el.querySelector('.pb');if(pb)pb.style.background=p.c;if(g('pp-pc'))g('pp-pc').value=p.c;trigSave();};pcp.appendChild(b);});
+    bind('pp-pc','input',()=>{const pb=el.querySelector('.pb');if(pb)pb.style.background=g('pp-pc').value;trigSave();});
+  }
   bind('pp-conn','click',()=>startConnB(el));
   bind('pp-dup','click',()=>dupBlock(el));
-  bind('pp-frt','click',()=>{el.style.zIndex=++nxtZ;});
   bind('pp-del','click',()=>removeBlock(el));
 }
 
@@ -3814,10 +4116,11 @@ function addCLItem(btn){
   const cl=btn.previousElementSibling;
   const item=document.createElement('div');
   item.className='cli';
-  item.innerHTML='<input type="checkbox" onchange="toggleCL(this)"><div class="ct" contenteditable="true" spellcheck="false" oninput="trigSave()">Görev</div>';
+  item.innerHTML='<input type="checkbox" onchange="toggleCL(this)"><div class="ct" contenteditable="true" spellcheck="false" oninput="trigSave(this)">Görev</div>';
   cl.appendChild(item);
   item.querySelector('[contenteditable]').focus();
   updCLProgress(btn.closest('.b-cl'));
+  const block=btn.closest('.block');if(block)block.style.height='auto';
   trigSave();
 }
 function updProg(inp){
@@ -3836,7 +4139,7 @@ function adjCtr(btn,d){
   setTimeout(()=>cv.classList.remove('bump'),200);
   trigSave();
 }
-function addTN(btn){const tn=btn.closest('.tn');let ch=tn.nextElementSibling;if(!ch||!ch.classList.contains('t-child')){ch=document.createElement('div');ch.className='t-child';tn.after(ch);}const nn=document.createElement('div');nn.innerHTML=`<div class="tn"><div class="tb"></div><div class="tt" contenteditable="true" spellcheck="false" oninput="trigSave()">Dal</div><button class="ta" onclick="addTN(this)">+</button><button class="ta" onclick="this.closest('.tn').remove();trigSave()">✕</button></div>`;ch.appendChild(nn.firstElementChild);trigSave();}
+function addTN(btn){const tn=btn.closest('.tn');let ch=tn.nextElementSibling;if(!ch||!ch.classList.contains('t-child')){ch=document.createElement('div');ch.className='t-child';tn.after(ch);}const nn=document.createElement('div');nn.innerHTML=`<div class="tn"><div class="tb"></div><div class="tt" contenteditable="true" spellcheck="false" oninput="trigSave(this)">Dal</div><button class="ta" onclick="addTN(this)">+</button><button class="ta" onclick="this.closest('.tn').remove();trigSave()">✕</button></div>`;ch.appendChild(nn.firstElementChild);trigSave();}
 
 // ═══ HISTORY ═══
 function snapState(){return{blocks:exportBlocks(),conn:JSON.parse(JSON.stringify(connections||[]))};}
